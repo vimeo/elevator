@@ -1,0 +1,9 @@
+[package]
+name = "av1levelr"
+version = "0.1.0"
+authors = ["Raphaël Zumer <raphael.zumer@vimeo.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
