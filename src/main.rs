@@ -157,12 +157,6 @@ fn main() -> Result<()> {
 
             let old_level = sh.op[0].seq_level_idx;
 
-            if level > 7 && old_level <= 7 {
-                unimplemented!(
-                    "patching a tier in not yet supported"
-                );
-            }
-
             // Replace the level, if the output is to a file.
             if has_output_file {
                 // Compute the location (offset) of the first operating point's level.
@@ -250,7 +244,7 @@ fn main() -> Result<()> {
 
                 let tier_adjusted_bits: [u8; 2];
                 let mut next_input_byte = [0_u8; 1]; // when removing a tier bit (reader runs ahead)
-                let mut _carry_bit = 0_u8; // used when adding a tier bit (reader runs behind)
+                let mut carry_bit = 0_u8; // used when adding a tier bit (reader runs behind)
 
                 if old_level > 7 && level <= 7 {
                     // The tier bit must be removed.
@@ -277,14 +271,16 @@ fn main() -> Result<()> {
 
                     // The last bit is shifted out of the two-byte range, and must be
                     // stored to realign the rest of the bitstream. (TODO)
-                    _carry_bit = byte_buf[1] << 7;
+                    carry_bit = byte_buf[1] << 7;
                 } else {
                     // No adjustment is needed.
                     tier_adjusted_bits = byte_buf;
                 }
 
-                byte_buf[0] = level_aligned[0] | (tier_adjusted_bits[0] & (tier_bit_mask[0] | post_tier_bit_mask[0]));
-                byte_buf[1] = level_aligned[1] | (tier_adjusted_bits[1] & (tier_bit_mask[1] | post_tier_bit_mask[1]));
+                byte_buf[0] = level_aligned[0]
+                    | (tier_adjusted_bits[0] & (tier_bit_mask[0] | post_tier_bit_mask[0]));
+                byte_buf[1] = level_aligned[1]
+                    | (tier_adjusted_bits[1] & (tier_bit_mask[1] | post_tier_bit_mask[1]));
 
                 println!("{:#010b}, {:#010b}", byte_buf[0], byte_buf[1]);
 
@@ -293,35 +289,35 @@ fn main() -> Result<()> {
                     .expect("could not write the level byte(s)");
 
                 // Realign the rest of the sequence header OBU if needed (i.e. if a tier bit is added/removed).
-                let mut pos_in_seq; // writer's position within the sequence header
+                let mut pos_in_seq = lv_bit_offset_in_seq / 8 + 2;; // writer's position within the sequence header
+                let mut next_output_byte: u8;
 
-                if old_level > 7 && level <= 7 {
-                    // Due to the earlier shifting, the reader is always one byte ahead.
-                    pos_in_seq = lv_bit_offset_in_seq / 8 + 2;
-
-                    while pos_in_seq < seq_sz.into() {
+                while pos_in_seq < seq_sz.into() {
+                    if old_level > 7 && level <= 7 {
+                        // Due to the earlier shifting, the reader is always one byte ahead.
                         let prev_input_byte = next_input_byte;
 
                         reader
                             .read(&mut next_input_byte)
                             .expect("could not read sequence header OBU byte");
 
-                        let next_output_byte =
-                            (prev_input_byte[0] << 1) | (next_input_byte[0] >> 7);
+                        next_output_byte = (prev_input_byte[0] << 1) | (next_input_byte[0] >> 7);
+                    } else if old_level <= 7 && level > 7 {
+                        reader
+                            .read(&mut next_input_byte)
+                            .expect("could not read sequence header OBU byte");
 
-                        writer
-                            .write_all(&[next_output_byte])
-                            .expect("could not write sequence header OBU byte");
-
-                        pos_in_seq += 1;
+                        next_output_byte = next_input_byte[0] >> 1 | carry_bit;
+                        carry_bit = next_input_byte[0] << 7;
+                    } else {
+                        break;
                     }
-                } else if old_level <= 7 && level > 7 {
-                    // Due to the earlier shifting, the writer is always one byte ahead.
-                    //pos_in_seq = lv_byte_offset + 3;
 
-                    // TODO
+                    writer
+                        .write_all(&[next_output_byte])
+                        .expect("could not write sequence header OBU byte");
 
-                    unimplemented!("patching a tier bit into the bitstream not yet supported");
+                    pos_in_seq += 1;
                 }
 
                 writer.flush()?;
