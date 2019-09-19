@@ -230,7 +230,8 @@ fn main() -> Result<()> {
 
                 // Modify the input bytes such that the level bits match the target level.
                 byte_buf[0] = byte_buf[0] & !bit_mask[0] | level_aligned[0];
-                byte_buf[1] |= byte_buf[1] & !bit_mask[1] | level_aligned[1];
+                byte_buf[1] = byte_buf[1] & !bit_mask[1] | level_aligned[1];
+
                 println!("{:#010b}, {:#010b}", byte_buf[0], byte_buf[1]);
 
                 writer
