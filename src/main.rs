@@ -90,7 +90,6 @@ fn main() -> Result<()> {
 
     let mut seq = av1p::av1::Sequence::new();
     let mut seq_pos = 0;
-    let mut tile_info = av1p::obu::TileInfo::default();
 
     match fmt {
         av1p::FileFormat::IVF => {
@@ -117,8 +116,6 @@ fn main() -> Result<()> {
                                 seq.sh.as_ref().unwrap(),
                                 &mut seq.rfman,
                             ) {
-                                tile_info = fh.tile_info;
-
                                 if fh.show_frame || fh.show_existing_frame {
                                     seq.rfman.output_process(&fh);
                                 }
@@ -132,6 +129,7 @@ fn main() -> Result<()> {
                             break 'ivf;
                         }
                         av1p::obu::OBU_SEQUENCE_HEADER => {
+                            // Track the start location of the sequence header for patching.
                             seq_pos = pos;
                             obu::process_obu(&mut reader, &mut seq, &obu);
                         }
@@ -176,9 +174,12 @@ fn main() -> Result<()> {
                     std::fs::copy(input_fname, output_fname)?;
                 }
 
+                // Locate the first level byte by simply counting the bits that come before it.
                 let lv_bit_offset_in_seq = if sh.reduced_still_picture_header {
                     5
                 } else {
+                    // When timing info is present, there may be more nested header data to skip,
+                    // but it is not currently handled by av1parser or coded by rav1e.
                     24 + if sh.timing_info_present_flag {
                         unimplemented!()
                     } else {
@@ -192,13 +193,17 @@ fn main() -> Result<()> {
                     .expect("could not open the specified output file");
                 writer = BufWriter::new(output_file);
 
+                // Both the reader and writer should point to the first byte which contains level bits.
                 reader.seek(SeekFrom::Start(seq_pos + lv_bit_offset_in_seq / 8))?;
                 writer.seek(SeekFrom::Start(seq_pos + lv_bit_offset_in_seq / 8))?;
 
+                // Determine the number of bits preceding the level in the byte.
                 let lv_bit_offset_in_byte = lv_bit_offset_in_seq % 8;
 
+                // Generate a bitstream-aligned two-byte sequence containing the level bits.
                 let level_aligned =
                     (((level as u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
+                // Generate a two-byte mask to filter out the non-level bits.
                 let bit_mask =
                     (((0b0001_1111 as u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
                 println!(
@@ -211,6 +216,7 @@ fn main() -> Result<()> {
                     .read(&mut byte_buf)
                     .expect("could not read the level byte(s)");
 
+                // Ensure that the bytes read from the input file correspond to the level parsed earlier.
                 assert_eq!(
                     old_level,
                     ((u16::from_be_bytes(byte_buf) as u32) >> 11 << lv_bit_offset_in_byte) as u8,
@@ -221,20 +227,19 @@ fn main() -> Result<()> {
                     "input/output bytes: {:#010b}, {:#010b} / ",
                     byte_buf[0], byte_buf[1]
                 );
+
+                // Modify the input bytes such that the level bits match the target level.
                 byte_buf[0] = byte_buf[0] & !bit_mask[0] | level_aligned[0];
                 byte_buf[1] |= byte_buf[1] & !bit_mask[1] | level_aligned[1];
                 println!("{:#010b}, {:#010b}", byte_buf[0], byte_buf[1]);
+
                 writer
                     .write_all(&byte_buf)
                     .expect("could not write the level byte(s)");
-
                 writer.flush()?;
             }
 
-            println!(
-                "tile config: {}x{} | level: {} -> {}",
-                tile_info.tile_cols, tile_info.tile_rows, old_level, level
-            );
+            println!("level: {} -> {}", old_level, level);
         }
         _ => {
             unimplemented!();
