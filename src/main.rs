@@ -90,6 +90,7 @@ fn main() -> Result<()> {
 
     let mut seq = av1p::av1::Sequence::new();
     let mut seq_pos = 0;
+    let mut seq_sz = 0;
 
     match fmt {
         av1p::FileFormat::IVF => {
@@ -129,9 +130,10 @@ fn main() -> Result<()> {
                             break 'ivf;
                         }
                         av1p::obu::OBU_SEQUENCE_HEADER => {
-                            // Track the start location of the sequence header for patching.
+                            // Track the start location and size of the sequence header OBU for patching.
                             seq_pos = pos;
                             obu::process_obu(&mut reader, &mut seq, &obu);
+                            seq_sz = obu.obu_size;
                         }
                         _ => {
                             obu::process_obu(&mut reader, &mut seq, &obu);
@@ -155,9 +157,9 @@ fn main() -> Result<()> {
 
             let old_level = sh.op[0].seq_level_idx;
 
-            if level > 7 && old_level <= 7 || level <= 7 && old_level > 7 {
+            if level > 7 && old_level <= 7 {
                 unimplemented!(
-                    "patching a tier in or out (mixing levels <= and > 7) not yet supported"
+                    "patching a tier in not yet supported"
                 );
             }
 
@@ -194,8 +196,9 @@ fn main() -> Result<()> {
                 writer = BufWriter::new(output_file);
 
                 // Both the reader and writer should point to the first byte which contains level bits.
-                reader.seek(SeekFrom::Start(seq_pos + lv_bit_offset_in_seq / 8))?;
-                writer.seek(SeekFrom::Start(seq_pos + lv_bit_offset_in_seq / 8))?;
+                let lv_byte_offset = seq_pos + lv_bit_offset_in_seq / 8;
+                reader.seek(SeekFrom::Start(lv_byte_offset))?;
+                writer.seek(SeekFrom::Start(lv_byte_offset))?;
 
                 // Determine the number of bits preceding the level in the byte.
                 let lv_bit_offset_in_byte = lv_bit_offset_in_seq % 8;
@@ -204,11 +207,24 @@ fn main() -> Result<()> {
                 let level_aligned =
                     (((level as u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
                 // Generate a two-byte mask to filter out the non-level bits.
-                let bit_mask =
-                    (((0b0001_1111 as u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
+                let level_bit_mask =
+                    (((0b0001_1111_u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
+                // Generate a single bit mask to identify the tier bit, which immediately follows the level bits.
+                let tier_bit_mask =
+                    (((0b0000_0001_u32) << 11 >> lv_bit_offset_in_byte) as u16 >> 1).to_be_bytes();
+                let post_tier_bit_mask =
+                    (((0b1111_1111_1111_1111) << 3 >> lv_bit_offset_in_byte >> 8 >> 1) as u16)
+                        .to_be_bytes();
                 println!(
                     "offset: {} | level bits: {:#010b}, {:#010b}",
                     lv_bit_offset_in_byte, level_aligned[0], level_aligned[1]
+                );
+
+                println!(
+                    "level/tier/post-tier bit masks: {:#018b} / {:#018b} / {:#018b}",
+                    u16::from_be_bytes(level_bit_mask),
+                    u16::from_be_bytes(tier_bit_mask),
+                    u16::from_be_bytes(post_tier_bit_mask)
                 );
 
                 let mut byte_buf = [0_u8; 2];
@@ -229,14 +245,85 @@ fn main() -> Result<()> {
                 );
 
                 // Modify the input bytes such that the level bits match the target level.
-                byte_buf[0] = byte_buf[0] & !bit_mask[0] | level_aligned[0];
-                byte_buf[1] = byte_buf[1] & !bit_mask[1] | level_aligned[1];
+                byte_buf[0] = byte_buf[0] & !level_bit_mask[0] | level_aligned[0];
+                byte_buf[1] = byte_buf[1] & !level_bit_mask[1] | level_aligned[1];
+
+                let tier_adjusted_bits: [u8; 2];
+                let mut next_input_byte = [0_u8; 1]; // when removing a tier bit (reader runs ahead)
+                let mut _carry_bit = 0_u8; // used when adding a tier bit (reader runs behind)
+
+                if old_level > 7 && level <= 7 {
+                    // The tier bit must be removed.
+                    // In that case, ensure that the tier bit is 0 (Main tier).
+                    if byte_buf[0] & tier_bit_mask[0] > 0 || byte_buf[1] & tier_bit_mask[1] > 0 {
+                        panic!("cannot reduce level below 4.0 when High tier is specified");
+                    }
+
+                    // Read one byte ahead, to shift the second byte in the current two-byte sequence.
+                    reader
+                        .read(&mut next_input_byte)
+                        .expect("could not read the post-tier byte");
+
+                    tier_adjusted_bits = [
+                        (byte_buf[0] << 1) | (byte_buf[1] >> 7) & post_tier_bit_mask[0],
+                        (byte_buf[1] << 1 | (next_input_byte[0] >> 7) & post_tier_bit_mask[1]),
+                    ];
+                } else if old_level <= 7 && level > 7 {
+                    // The tier bit must be added.
+                    tier_adjusted_bits = [
+                        (byte_buf[0] >> 1) & !tier_bit_mask[0],
+                        (byte_buf[1] >> 1) & !tier_bit_mask[1] | byte_buf[0] << 7,
+                    ];
+
+                    // The last bit is shifted out of the two-byte range, and must be
+                    // stored to realign the rest of the bitstream. (TODO)
+                    _carry_bit = byte_buf[1] << 7;
+                } else {
+                    // No adjustment is needed.
+                    tier_adjusted_bits = byte_buf;
+                }
+
+                byte_buf[0] = level_aligned[0] | (tier_adjusted_bits[0] & (tier_bit_mask[0] | post_tier_bit_mask[0]));
+                byte_buf[1] = level_aligned[1] | (tier_adjusted_bits[1] & (tier_bit_mask[1] | post_tier_bit_mask[1]));
 
                 println!("{:#010b}, {:#010b}", byte_buf[0], byte_buf[1]);
 
                 writer
                     .write_all(&byte_buf)
                     .expect("could not write the level byte(s)");
+
+                // Realign the rest of the sequence header OBU if needed (i.e. if a tier bit is added/removed).
+                let mut pos_in_seq; // writer's position within the sequence header
+
+                if old_level > 7 && level <= 7 {
+                    // Due to the earlier shifting, the reader is always one byte ahead.
+                    pos_in_seq = lv_bit_offset_in_seq / 8 + 2;
+
+                    while pos_in_seq < seq_sz.into() {
+                        let prev_input_byte = next_input_byte;
+
+                        reader
+                            .read(&mut next_input_byte)
+                            .expect("could not read sequence header OBU byte");
+
+                        let next_output_byte =
+                            (prev_input_byte[0] << 1) | (next_input_byte[0] >> 7);
+
+                        writer
+                            .write_all(&[next_output_byte])
+                            .expect("could not write sequence header OBU byte");
+
+                        pos_in_seq += 1;
+                    }
+                } else if old_level <= 7 && level > 7 {
+                    // Due to the earlier shifting, the writer is always one byte ahead.
+                    //pos_in_seq = lv_byte_offset + 3;
+
+                    // TODO
+
+                    unimplemented!("patching a tier bit into the bitstream not yet supported");
+                }
+
                 writer.flush()?;
             }
 
