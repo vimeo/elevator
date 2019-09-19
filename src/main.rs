@@ -2,10 +2,12 @@ extern crate av1parser;
 extern crate clap;
 
 mod ivf;
+mod level;
 mod obu;
 
 use av1parser as av1p;
 use clap::{App, Arg};
+use level::*;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
 
@@ -60,14 +62,21 @@ fn main() -> Result<()> {
 
     let inplace = matches.is_present("inplace");
 
-    if !matches.is_present("forcedlevel") {
-        unimplemented!("automatic level computation is not yet supported");
-    }
-
-    let forced_level = matches.value_of("forcedlevel");
-    if forced_level.is_some() {
-        forced_level.unwrap().parse::<u8>().unwrap(); // check that the value is valid before processing
-    }
+    let forced_level = if let Some(forced_level_str) = matches.value_of("forcedlevel") {
+        let forced_level_idx = forced_level_str
+            .parse::<usize>()
+            .expect("invalid forcedlevel value");
+        let level = LEVELS
+            .get(forced_level_idx)
+            .expect("forcedlevel value out of range");
+        if level.is_valid() {
+            Some(level)
+        } else {
+            panic!("forcedlevel value is not spec-defined");
+        }
+    } else {
+        None
+    };
 
     // Open the specified input file using a buffered reader.
     let input_fname = matches.value_of("input").unwrap();
@@ -91,6 +100,8 @@ fn main() -> Result<()> {
     let mut seq = av1p::av1::Sequence::new();
     let mut seq_pos = 0;
     let mut seq_sz = 0;
+
+    let mut tiling_info = av1p::obu::TileInfo::default();
 
     match fmt {
         av1p::FileFormat::IVF => {
@@ -117,6 +128,8 @@ fn main() -> Result<()> {
                                 seq.sh.as_ref().unwrap(),
                                 &mut seq.rfman,
                             ) {
+                                tiling_info = fh.tile_info;
+
                                 if fh.show_frame || fh.show_existing_frame {
                                     seq.rfman.output_process(&fh);
                                 }
@@ -149,13 +162,25 @@ fn main() -> Result<()> {
             let sh = seq.sh.unwrap(); // sequence header
 
             // Determine the output level.
-            let level: u8 = if let Some(level) = forced_level {
-                level.parse().unwrap()
+            let level: Level = if forced_level.is_some() {
+                *forced_level.unwrap()
             } else {
-                unimplemented!("level computation not yet supported")
+                // Generate a SequenceContext using the parsed data.
+                let seq_ctx = SequenceContext {
+                    tier: if sh.op[0].seq_tier == 0 { Tier::Main } else { Tier::High },
+                    pic_size: (sh.max_frame_width as u16, sh.max_frame_height as u16), // (width, height)
+                    display_rate: 0,
+                    decode_rate: 0,
+                    header_rate: 0,
+                    mbps: 0.0,
+                    cr: 0,
+                    tiles: (tiling_info.tile_cols as u8, tiling_info.tile_rows as u8), // (cols, rows)
+                };
+
+                calculate_level(&seq_ctx)
             };
 
-            let old_level = sh.op[0].seq_level_idx;
+            let old_level = &LEVELS[usize::from(sh.op[0].seq_level_idx)];
 
             // Replace the level, if the output is to a file.
             if has_output_file {
@@ -199,7 +224,7 @@ fn main() -> Result<()> {
 
                 // Generate a bitstream-aligned two-byte sequence containing the level bits.
                 let level_aligned =
-                    (((level as u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
+                    (((level.0 as u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
                 // Generate a two-byte mask to filter out the non-level bits.
                 let level_bit_mask =
                     (((0b0001_1111_u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
@@ -228,7 +253,7 @@ fn main() -> Result<()> {
 
                 // Ensure that the bytes read from the input file correspond to the level parsed earlier.
                 assert_eq!(
-                    old_level,
+                    old_level.0,
                     ((u16::from_be_bytes(byte_buf) as u32) >> 11 << lv_bit_offset_in_byte) as u8,
                     "level at the location seeked to patch does not match the parsed value"
                 );
@@ -246,7 +271,7 @@ fn main() -> Result<()> {
                 let mut next_input_byte = [0_u8; 1]; // when removing a tier bit (reader runs ahead)
                 let mut carry_bit = 0_u8; // used when adding a tier bit (reader runs behind)
 
-                if old_level > 7 && level <= 7 {
+                if old_level.0 > 7 && level.0 <= 7 {
                     // The tier bit must be removed.
                     // In that case, ensure that the tier bit is 0 (Main tier).
                     if byte_buf[0] & tier_bit_mask[0] > 0 || byte_buf[1] & tier_bit_mask[1] > 0 {
@@ -262,7 +287,7 @@ fn main() -> Result<()> {
                         (byte_buf[0] << 1) | (byte_buf[1] >> 7) & post_tier_bit_mask[0],
                         (byte_buf[1] << 1 | (next_input_byte[0] >> 7) & post_tier_bit_mask[1]),
                     ];
-                } else if old_level <= 7 && level > 7 {
+                } else if old_level.0 <= 7 && level.0 > 7 {
                     // The tier bit must be added.
                     tier_adjusted_bits = [
                         (byte_buf[0] >> 1) & !tier_bit_mask[0],
@@ -293,7 +318,7 @@ fn main() -> Result<()> {
                 let mut next_output_byte: u8;
 
                 while pos_in_seq < seq_sz.into() {
-                    if old_level > 7 && level <= 7 {
+                    if old_level.0 > 7 && level.0 <= 7 {
                         // Due to the earlier shifting, the reader is always one byte ahead.
                         let prev_input_byte = next_input_byte;
 
@@ -302,7 +327,7 @@ fn main() -> Result<()> {
                             .expect("could not read sequence header OBU byte");
 
                         next_output_byte = (prev_input_byte[0] << 1) | (next_input_byte[0] >> 7);
-                    } else if old_level <= 7 && level > 7 {
+                    } else if old_level.0 <= 7 && level.0 > 7 {
                         reader
                             .read(&mut next_input_byte)
                             .expect("could not read sequence header OBU byte");
