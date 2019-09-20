@@ -19,6 +19,8 @@ fn main() -> Result<()> {
         };
     }
 
+    let level_strings = LEVELS.iter().filter(|&l| l.is_valid()).map(|&l| l.0.to_string()).rev().collect::<Vec<_>>();
+
     let matches = App::new(cargo_env!("NAME"))
         .version(cargo_env!("VERSION"))
         .author(cargo_env!("AUTHORS"))
@@ -52,6 +54,7 @@ fn main() -> Result<()> {
                 .long("forcedlevel")
                 .value_name("FORCED_LEVEL")
                 .help("Force a level instead of calculating it")
+                .possible_values(&level_strings.iter().map(|l| &**l).collect::<Vec<_>>())
                 .required(false),
         )
         .get_matches();
@@ -63,17 +66,8 @@ fn main() -> Result<()> {
     let inplace = matches.is_present("inplace");
 
     let forced_level = if let Some(forced_level_str) = matches.value_of("forcedlevel") {
-        let forced_level_idx = forced_level_str
-            .parse::<usize>()
-            .expect("invalid forcedlevel value");
-        let level = LEVELS
-            .get(forced_level_idx)
-            .expect("forcedlevel value out of range");
-        if level.is_valid() {
-            Some(level)
-        } else {
-            panic!("forcedlevel value is not spec-defined");
-        }
+        // The value is guaranteed to be valid, as it is validated by clap (`possible_values()`).
+        Some(LEVELS[forced_level_str.parse::<usize>().unwrap()])
     } else {
         None
     };
@@ -163,7 +157,7 @@ fn main() -> Result<()> {
 
             // Determine the output level.
             let level: Level = if forced_level.is_some() {
-                *forced_level.unwrap()
+                forced_level.unwrap()
             } else {
                 // Generate a SequenceContext using the parsed data.
                 let seq_ctx = SequenceContext {
