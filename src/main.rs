@@ -105,13 +105,24 @@ fn main() -> Result<()> {
     let mut seq_sz = 0;
 
     let mut tiling_info = av1p::obu::TileInfo::default();
+    let mut header_count = 1; // the number of frame and frame header (excluding show_existing_frame) OBUs
+    let mut total_size = 0; // the total compressed size of frame, frame header, metadata, and tile group OBUs
+    let mut frame_count = 0; // total number of coded frame (i.e. number of frame headers that are not show_existing_frame)
+    let mut shown_frame_count = 0; // total number of shown frames (i.e. number of frame headers with show_frame or show_existing_frame)
 
     match fmt {
         av1p::FileFormat::IVF => {
-            // Adapted from av1parser
-            ivf::parse_ivf_header(&mut reader, input_fname)?;
+            let header = ivf::parse_ivf_header(&mut reader, input_fname)?;
+            let fps = header.nframes * header.timescale as u32 / header.framerate as u32;
+            if verbose {
+                println!(
+                    "time scale, frame rate, number of frames: {}, {}, {} ({} fps)",
+                    header.timescale, header.framerate, header.nframes, fps
+                );
+            }
 
-            'ivf: while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
+            // Adapted from av1parser
+            while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
                 let mut sz = frame.size;
                 let pos = reader.seek(SeekFrom::Current(0))?;
                 while sz > 0 {
@@ -121,29 +132,42 @@ fn main() -> Result<()> {
                     let pos = reader.seek(SeekFrom::Current(0))?;
 
                     match obu.obu_type {
-                        av1p::obu::OBU_FRAME_HEADER => {
+                        av1p::obu::OBU_FRAME_HEADER | av1p::obu::OBU_FRAME => {
                             if seq.sh.is_none() {
                                 panic!("frame header found before sequence header");
                             }
+
+                            total_size += obu.obu_size;
 
                             if let Some(fh) = av1p::obu::parse_frame_header(
                                 &mut reader,
                                 seq.sh.as_ref().unwrap(),
                                 &mut seq.rfman,
                             ) {
-                                tiling_info = fh.tile_info;
-
                                 if fh.show_frame || fh.show_existing_frame {
+                                    if obu.obu_type == av1p::obu::OBU_FRAME_HEADER {
+                                        shown_frame_count += 1;
+                                    }
+
                                     seq.rfman.output_process(&fh);
                                 }
-                                if obu.obu_type == av1p::obu::OBU_FRAME {
+
+                                if obu.obu_type == av1p::obu::OBU_FRAME_HEADER {
+                                    tiling_info = fh.tile_info;
+
+                                    if fh.show_existing_frame {
+                                        header_count += 1;
+                                    } else {
+                                        frame_count += 1;
+                                    }
+                                } else {
+                                    header_count += 1;
                                     seq.rfman.update_process(&fh);
                                 }
                             }
-
-                            // We currently assume the tile configuration is constant,
-                            // so only one frame header needs to be processed.
-                            break 'ivf;
+                        }
+                        av1p::obu::OBU_METADATA | av1p::obu::OBU_TILE_GROUP => {
+                            total_size += obu.obu_size;
                         }
                         av1p::obu::OBU_SEQUENCE_HEADER => {
                             // Track the start location and size of the sequence header OBU for patching.
@@ -162,7 +186,16 @@ fn main() -> Result<()> {
                 reader.seek(SeekFrom::Start(pos + frame.size as u64))?;
             }
 
+            let compressed_size = if total_size < 128 {
+                0
+            } else {
+                total_size - 128
+            };
+
             let sh = seq.sh.unwrap(); // sequence header
+            if sh.operating_points_cnt > 1 {
+                unimplemented!("multiple operating points are not yet supported");
+            }
 
             // Determine the output level.
             let level: Level = if forced_level.is_some() {
@@ -191,18 +224,14 @@ fn main() -> Result<()> {
 
             // Replace the level, if the output is to a file.
             if has_output_file {
-                // Compute the location (offset) of the first operating point's level.
-                // TODO: properly offset timing and decoder model info and any other missing data that is not decoded by av1parser
-                if sh.operating_points_cnt > 1 {
-                    unimplemented!("multiple operating points are not yet supported");
-                }
-
                 // Copy the file contents from input to output if needed.
                 if !inplace {
                     std::fs::copy(input_fname, output_fname)?;
                 }
 
                 // Locate the first level byte by simply counting the bits that come before it.
+                // This is only valid for single operating point sequences.
+                // TODO: properly offset timing and decoder model info and any other missing data that is not decoded by av1parser
                 let lv_bit_offset_in_seq = if sh.reduced_still_picture_header {
                     5
                 } else {
