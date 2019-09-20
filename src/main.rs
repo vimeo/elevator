@@ -19,7 +19,12 @@ fn main() -> Result<()> {
         };
     }
 
-    let level_strings = LEVELS.iter().filter(|&l| l.is_valid()).map(|&l| l.0.to_string()).rev().collect::<Vec<_>>();
+    let level_strings = LEVELS
+        .iter()
+        .filter(|&l| l.is_valid())
+        .map(|&l| l.0.to_string())
+        .rev()
+        .collect::<Vec<_>>();
 
     let matches = App::new(cargo_env!("NAME"))
         .version(cargo_env!("VERSION"))
@@ -39,14 +44,12 @@ fn main() -> Result<()> {
                 .short("o")
                 .long("output")
                 .value_name("OUTPUT_FILE")
-                .help("Output filename")
-                .required(false),
+                .help("Output filename"),
         )
         .arg(
             Arg::with_name("inplace")
                 .long("inplace")
-                .help("Patch file in-place")
-                .required(false),
+                .help("Patch file in-place"),
         )
         .arg(
             Arg::with_name("forcedlevel")
@@ -54,8 +57,13 @@ fn main() -> Result<()> {
                 .long("forcedlevel")
                 .value_name("FORCED_LEVEL")
                 .help("Force a level instead of calculating it")
-                .possible_values(&level_strings.iter().map(|l| &**l).collect::<Vec<_>>())
-                .required(false),
+                .possible_values(&level_strings.iter().map(|l| &**l).collect::<Vec<_>>()),
+        )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .long("verbose")
+                .help("Display verbose output, which may be helpful for debugging"),
         )
         .get_matches();
 
@@ -64,6 +72,7 @@ fn main() -> Result<()> {
     }
 
     let inplace = matches.is_present("inplace");
+    let verbose = matches.is_present("verbose");
 
     let forced_level = if let Some(forced_level_str) = matches.value_of("forcedlevel") {
         // The value is guaranteed to be valid, as it is validated by clap (`possible_values()`).
@@ -161,7 +170,11 @@ fn main() -> Result<()> {
             } else {
                 // Generate a SequenceContext using the parsed data.
                 let seq_ctx = SequenceContext {
-                    tier: if sh.op[0].seq_tier == 0 { Tier::Main } else { Tier::High },
+                    tier: if sh.op[0].seq_tier == 0 {
+                        Tier::Main
+                    } else {
+                        Tier::High
+                    },
                     pic_size: (sh.max_frame_width as u16, sh.max_frame_height as u16), // (width, height)
                     display_rate: 0,
                     decode_rate: 0,
@@ -228,17 +241,20 @@ fn main() -> Result<()> {
                 let post_tier_bit_mask =
                     (((0b1111_1111_1111_1111) << 3 >> lv_bit_offset_in_byte >> 8 >> 1) as u16)
                         .to_be_bytes();
-                println!(
-                    "offset: {} | level bits: {:#010b}, {:#010b}",
-                    lv_bit_offset_in_byte, level_aligned[0], level_aligned[1]
-                );
 
-                println!(
-                    "level/tier/post-tier bit masks: {:#018b} / {:#018b} / {:#018b}",
-                    u16::from_be_bytes(level_bit_mask),
-                    u16::from_be_bytes(tier_bit_mask),
-                    u16::from_be_bytes(post_tier_bit_mask)
-                );
+                if verbose {
+                    println!(
+                        "offset: {} | level bits: {:#010b}, {:#010b}",
+                        lv_bit_offset_in_byte, level_aligned[0], level_aligned[1]
+                    );
+
+                    println!(
+                        "level/tier/post-tier bit masks: {:#018b} / {:#018b} / {:#018b}",
+                        u16::from_be_bytes(level_bit_mask),
+                        u16::from_be_bytes(tier_bit_mask),
+                        u16::from_be_bytes(post_tier_bit_mask)
+                    );
+                }
 
                 let mut byte_buf = [0_u8; 2];
                 reader
@@ -301,7 +317,9 @@ fn main() -> Result<()> {
                 byte_buf[1] = level_aligned[1]
                     | (tier_adjusted_bits[1] & (tier_bit_mask[1] | post_tier_bit_mask[1]));
 
-                println!("{:#010b}, {:#010b}", byte_buf[0], byte_buf[1]);
+                if verbose {
+                    println!("{:#010b}, {:#010b}", byte_buf[0], byte_buf[1]);
+                }
 
                 writer
                     .write_all(&byte_buf)
