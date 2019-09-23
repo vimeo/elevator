@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 av1parser = { git = "https://github.com/rzumer/av1parser", branch = "lib" }
 clap = "~2.33"
+same-file = "1"

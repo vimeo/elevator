@@ -1,5 +1,6 @@
 extern crate av1parser;
 extern crate clap;
+extern crate same_file;
 
 mod ivf;
 mod level;
@@ -8,6 +9,7 @@ mod obu;
 use av1parser as av1p;
 use clap::{App, Arg};
 use level::*;
+use same_file::is_same_file;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
 
@@ -71,8 +73,15 @@ fn main() -> Result<()> {
         panic!("cannot specify an output file and in-place at the same time");
     }
 
-    let inplace = matches.is_present("inplace");
     let verbose = matches.is_present("verbose");
+
+    let input_fname = matches.value_of("input").unwrap();
+    let output_fname = matches.value_of("output").unwrap_or(input_fname);
+
+    let inplace = matches.is_present("inplace")
+        || matches.is_present("output") && is_same_file(input_fname, output_fname)?;
+
+    let has_output_file = matches.is_present("output") || matches.is_present("inplace");
 
     let forced_level = if let Some(forced_level_str) = matches.value_of("forcedlevel") {
         // The value is guaranteed to be valid, as it is validated by clap (`possible_values()`).
@@ -82,11 +91,6 @@ fn main() -> Result<()> {
     };
 
     // Open the specified input file using a buffered reader.
-    let input_fname = matches.value_of("input").unwrap();
-    let output_fname = matches.value_of("output").unwrap_or(input_fname);
-
-    let has_output_file = matches.is_present("output") || matches.is_present("inplace");
-
     let input_file = OpenOptions::new()
         .read(true)
         .write(inplace)
