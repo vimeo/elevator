@@ -152,6 +152,10 @@ fn main() -> Result<()> {
                                     seq.rfman.output_process(&fh);
                                 }
 
+                                if !fh.show_existing_frame {
+                                    seq.rfman.update_process(&fh);
+                                }
+
                                 if obu.obu_type == av1p::obu::OBU_FRAME_HEADER {
                                     tiling_info = fh.tile_info;
 
@@ -162,7 +166,6 @@ fn main() -> Result<()> {
                                     }
                                 } else {
                                     header_count += 1;
-                                    seq.rfman.update_process(&fh);
                                 }
                             }
                         }
