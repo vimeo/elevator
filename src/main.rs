@@ -115,9 +115,10 @@ fn main() -> Result<()> {
     let mut shown_frame_count = 0; // total number of shown frames (i.e. number of frame headers with show_frame or show_existing_frame)
 
     match fmt {
+        // TODO: move out the generic processing work to support other formats
         av1p::FileFormat::IVF => {
             let header = ivf::parse_ivf_header(&mut reader, input_fname)?;
-            let fps = header.nframes * header.timescale as u32 / header.framerate as u32;
+            let fps = header.framerate as f64 / header.timescale as f64;
             if verbose {
                 println!(
                     "time scale, frame rate, number of frames: {}, {}, {} ({} fps)",
