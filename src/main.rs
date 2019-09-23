@@ -300,10 +300,12 @@ fn main() -> Result<()> {
                     "level at the location seeked to patch does not match the parsed value"
                 );
 
-                print!(
-                    "input/output bytes: {:#010b}, {:#010b} / ",
-                    byte_buf[0], byte_buf[1]
-                );
+                if verbose {
+                    print!(
+                        "input/output bytes: {:#010b}, {:#010b} / ",
+                        byte_buf[0], byte_buf[1]
+                    );
+                }
 
                 // Modify the input bytes such that the level bits match the target level.
                 byte_buf[0] = byte_buf[0] & !level_bit_mask[0] | level_aligned[0];
