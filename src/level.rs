@@ -350,29 +350,29 @@ pub const LEVELS: [Level; 32] = [
 ];
 
 pub fn calculate_level(context: &SequenceContext) -> Level {
-    let mut idx = 0;
-
-    for level in LEVELS[idx..].iter() {
-        let high_tier = context.tier == Tier::High && level.0 > 7; // only Main tier exists for low levels
-
+    for level in LEVELS.iter() {
         if let Some(limits) = level.1 {
-            if limits.max_pic_size < context.pic_size.0 as u32 * context.pic_size.1 as u32
-                || limits.max_h_size < context.pic_size.0
-                || limits.max_v_size < context.pic_size.1
-                || limits.max_display_rate < context.display_rate
-                || limits.max_decode_rate < context.decode_rate
-                || limits.max_header_rate < context.header_rate
-                || !high_tier && (limits.main_mbps < context.mbps || limits.main_cr < context.cr)
-                || high_tier && (limits.high_mbps < context.mbps || limits.high_cr < context.cr)
-                || limits.max_tiles < context.tiles.0 * context.tiles.1
-                || limits.max_tile_cols < context.tiles.0
-            {
-                idx += 1;
+            // Only Main tier exists for low levels.
+            let tier_valid = if context.tier == Tier::Main || level.0 <= 7 {
+                limits.main_mbps >= context.mbps && limits.main_cr >= context.cr
             } else {
-                return LEVELS[idx];
+                limits.high_mbps >= context.mbps && limits.high_cr >= context.cr
+            };
+
+            if limits.max_pic_size >= context.pic_size.0 as u32 * context.pic_size.1 as u32
+                && limits.max_h_size >= context.pic_size.0
+                && limits.max_v_size >= context.pic_size.1
+                && limits.max_display_rate >= context.display_rate
+                && limits.max_decode_rate >= context.decode_rate
+                && limits.max_header_rate >= context.header_rate
+                && tier_valid
+                && limits.max_tiles >= context.tiles.0 * context.tiles.1
+                && limits.max_tile_cols >= context.tiles.0
+            {
+                return *level;
             }
         }
     }
 
-    LEVELS[31]
+    unreachable!("no suitable level found");
 }
