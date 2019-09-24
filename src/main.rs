@@ -206,7 +206,16 @@ fn main() -> Result<()> {
                 total_size - 128
             };
 
-            let profile_factor = 1;
+            let sh = seq.sh.unwrap(); // sequence header
+            if sh.operating_points_cnt > 1 {
+                unimplemented!("multiple operating points are not yet supported");
+            }
+
+            let profile_factor = match sh.seq_profile {
+                0 => 15,
+                1 => 30,
+                _ => 36,
+            };
             let uncompressed_size = (header.width as usize * header.height as usize * profile_factor) >> 3;
 
             let header_rate = header_count as f64 / duration;
@@ -214,9 +223,8 @@ fn main() -> Result<()> {
             let decode_rate = frame_count as f64 / duration;
             let compressed_ratio = uncompressed_size as f64 / compressed_size as f64;
 
-            let sh = seq.sh.unwrap(); // sequence header
-            if sh.operating_points_cnt > 1 {
-                unimplemented!("multiple operating points are not yet supported");
+            if verbose {
+                println!("counted decoded/displayed frames: {}/{}", frame_count, shown_frame_count);
             }
 
             // Determine the output level.
