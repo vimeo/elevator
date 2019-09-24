@@ -119,11 +119,17 @@ fn main() -> Result<()> {
         av1p::FileFormat::IVF => {
             let header = ivf::parse_ivf_header(&mut reader, input_fname)?;
             let fps = header.framerate as f64 / header.timescale as f64;
+            let duration = header.nframes as f64 / fps;
+
             if verbose {
                 println!(
-                    "time scale, frame rate, number of frames: {}, {}, {} ({} fps)",
-                    header.timescale, header.framerate, header.nframes, fps
+                    "time scale, frame rate, number of frames: {}, {}, {} ({} fps, {} seconds)",
+                    header.timescale, header.framerate, header.nframes, fps, duration
                 );
+            }
+
+            if header.nframes == 0 {
+                unimplemented!("frame counting not yet supported");
             }
 
             // Adapted from av1parser
@@ -200,6 +206,14 @@ fn main() -> Result<()> {
                 total_size - 128
             };
 
+            let profile_factor = 1;
+            let uncompressed_size = (header.width as usize * header.height as usize * profile_factor) >> 3;
+
+            let header_rate = header_count as f64 / duration;
+            let display_rate = shown_frame_count as f64 / duration;
+            let decode_rate = frame_count as f64 / duration;
+            let compressed_ratio = uncompressed_size as f64 / compressed_size as f64;
+
             let sh = seq.sh.unwrap(); // sequence header
             if sh.operating_points_cnt > 1 {
                 unimplemented!("multiple operating points are not yet supported");
@@ -217,11 +231,11 @@ fn main() -> Result<()> {
                         Tier::High
                     },
                     pic_size: (sh.max_frame_width as u16, sh.max_frame_height as u16), // (width, height)
-                    display_rate: 0,
-                    decode_rate: 0,
-                    header_rate: 0,
-                    mbps: 0.0,
-                    cr: 0,
+                    display_rate: display_rate.round() as u64,
+                    decode_rate: decode_rate.round() as u64,
+                    header_rate: header_rate.round() as u16,
+                    mbps: total_size as f64 / 1_000_000.0,
+                    cr: compressed_ratio.round() as u8,
                     tiles: (tiling_info.tile_cols as u8, tiling_info.tile_rows as u8), // (cols, rows)
                 };
 
