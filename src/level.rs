@@ -368,9 +368,11 @@ pub fn calculate_level(context: &SequenceContext) -> Level {
                 || limits.max_tile_cols < context.tiles.0
             {
                 idx += 1;
+            } else {
+                return LEVELS[idx];
             }
         }
     }
 
-    LEVELS[idx]
+    LEVELS[31]
 }
