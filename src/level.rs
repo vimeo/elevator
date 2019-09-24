@@ -60,7 +60,7 @@ impl Display for Level {
             let x = 2 + (index >> 2);
             let y = index & 3;
 
-            write!(f, "{}.{}", x, y)
+            write!(f, "{}.{} ({})", x, y, self.0)
         }
     }
 }

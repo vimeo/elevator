@@ -123,7 +123,7 @@ fn main() -> Result<()> {
 
             if verbose {
                 println!(
-                    "time scale, frame rate, number of frames: {}, {}, {} ({} fps, {} seconds)",
+                    "time scale, frame rate, number of frames: {}, {}, {} ({:.3} fps, {:.3} seconds)",
                     header.timescale, header.framerate, header.nframes, fps, duration
                 );
             }
@@ -216,15 +216,34 @@ fn main() -> Result<()> {
                 1 => 30,
                 _ => 36,
             };
-            let uncompressed_size = (header.width as usize * header.height as usize * profile_factor) >> 3;
+            let uncompressed_size =
+                (header.width as usize * header.height as usize * profile_factor) >> 3;
 
             let header_rate = header_count as f64 / duration;
             let display_rate = shown_frame_count as f64 / duration;
             let decode_rate = frame_count as f64 / duration;
             let compressed_ratio = uncompressed_size as f64 / compressed_size as f64;
+            let mbps = total_size as f64 / duration / 1_000_000.0;
 
             if verbose {
-                println!("counted decoded/displayed frames: {}/{}", frame_count, shown_frame_count);
+                println!(
+                    "counted decoded/displayed frames: {}/{}",
+                    frame_count, shown_frame_count
+                );
+
+                println!(
+                    "header, display, decode rates: {:.3}, {:.3}, {:.3}",
+                    header_rate, display_rate, decode_rate
+                );
+
+                println!(
+                    "size: {} uncompressed, {} compressed (CR: {:.3})",
+                    uncompressed_size, compressed_size, compressed_ratio
+                );
+
+                println!("mbps: {:.3}", mbps);
+
+                println!("tiles: {}x{}", tiling_info.tile_cols, tiling_info.tile_rows);
             }
 
             // Determine the output level.
@@ -242,7 +261,7 @@ fn main() -> Result<()> {
                     display_rate: display_rate.round() as u64,
                     decode_rate: decode_rate.round() as u64,
                     header_rate: header_rate.round() as u16,
-                    mbps: total_size as f64 / 1_000_000.0,
+                    mbps: mbps,
                     cr: compressed_ratio.round() as u8,
                     tiles: (tiling_info.tile_cols as u8, tiling_info.tile_rows as u8), // (cols, rows)
                 };
