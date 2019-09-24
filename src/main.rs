@@ -211,13 +211,14 @@ fn main() -> Result<()> {
                 unimplemented!("multiple operating points are not yet supported");
             }
 
+            let picture_size = header.width as usize * header.height as usize;
+
             let profile_factor = match sh.seq_profile {
                 0 => 15,
                 1 => 30,
                 _ => 36,
             };
-            let uncompressed_size =
-                (header.width as usize * header.height as usize * profile_factor) >> 3;
+            let uncompressed_size = (picture_size * profile_factor) >> 3;
 
             let header_rate = header_count as f64 / duration;
             let display_rate = shown_frame_count as f64 / duration;
@@ -258,8 +259,8 @@ fn main() -> Result<()> {
                         Tier::High
                     },
                     pic_size: (sh.max_frame_width as u16, sh.max_frame_height as u16), // (width, height)
-                    display_rate: display_rate.round() as u64,
-                    decode_rate: decode_rate.round() as u64,
+                    display_rate: display_rate.round() as u64 * picture_size as u64,
+                    decode_rate: decode_rate.round() as u64 * picture_size as u64,
                     header_rate: header_rate.round() as u16,
                     mbps: mbps,
                     cr: compressed_ratio.round() as u8,
