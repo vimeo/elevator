@@ -112,7 +112,7 @@ fn main() -> Result<()> {
     let mut header_count = 1; // the number of frame and frame header (excluding show_existing_frame) OBUs
     let mut total_size = 0; // the total compressed size of frame, frame header, metadata, and tile group OBUs
     let mut frame_count = 0; // total number of coded frame (i.e. number of frame headers that are not show_existing_frame)
-    let mut shown_frame_count = 0; // total number of shown frames (i.e. number of frame headers with show_frame or show_existing_frame)
+    let mut max_show_rate = 0_f64; // max number of shown frames (i.e. number of frame headers with show_frame or show_existing_frame)
 
     match fmt {
         // TODO: move out the generic processing work to support other formats
@@ -132,6 +132,11 @@ fn main() -> Result<()> {
                 unimplemented!("frame counting not yet supported");
             }
 
+            let mut show_count = 0; // shown frame count for the current temporal unit
+            let mut last_tu_time = 0; // timestamp for the first frame of the last temporal unit
+            let mut cur_tu_time = 0; // timestamp for the first frame of the current temporal unit
+            let mut seen_frame_header = false; // refreshed with each temporal unit
+
             // Adapted from av1parser
             while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
                 let mut sz = frame.size;
@@ -143,6 +148,13 @@ fn main() -> Result<()> {
                     let pos = reader.seek(SeekFrom::Current(0))?;
 
                     match obu.obu_type {
+                        av1p::obu::OBU_TEMPORAL_DELIMITER => {
+                            max_show_rate = max_show_rate.max(show_count as f64 / (frame.pts - cur_tu_time) as f64);
+                            show_count = 0;
+                            seen_frame_header = false;
+
+                            obu::process_obu(&mut reader, &mut seq, &obu);
+                        }
                         av1p::obu::OBU_FRAME_HEADER | av1p::obu::OBU_FRAME => {
                             if seq.sh.is_none() {
                                 panic!("frame header found before sequence header");
@@ -155,8 +167,14 @@ fn main() -> Result<()> {
                                 seq.sh.as_ref().unwrap(),
                                 &mut seq.rfman,
                             ) {
+                                if !seen_frame_header {
+                                    last_tu_time = cur_tu_time;
+                                    cur_tu_time = frame.pts;
+                                }
+                                seen_frame_header = true;
+
                                 if fh.show_frame || fh.show_existing_frame {
-                                    shown_frame_count += 1;
+                                    show_count += 1;
 
                                     seq.rfman.output_process(&fh);
                                 }
@@ -197,6 +215,9 @@ fn main() -> Result<()> {
                 reader.seek(SeekFrom::Start(pos + frame.size as u64))?;
             }
 
+            // Do the final updates for header/display/show rates.
+            max_show_rate = max_show_rate.max(show_count as f64 / (cur_tu_time - last_tu_time) as f64);
+
             let compressed_size = if total_size < 128 {
                 0
             } else {
@@ -218,20 +239,19 @@ fn main() -> Result<()> {
             let uncompressed_size = (picture_size * profile_factor) >> 3;
 
             let header_rate = header_count as f64 / duration;
-            let display_rate = shown_frame_count as f64 / duration;
             let decode_rate = frame_count as f64 / duration;
             let compressed_ratio = uncompressed_size as f64 / compressed_size as f64;
             let mbps = total_size as f64 / duration / 1_000_000.0;
 
             if verbose {
                 println!(
-                    "counted decoded/displayed frames: {}/{}",
-                    frame_count, shown_frame_count
+                    "counted decoded frames: {}",
+                    frame_count
                 );
 
                 println!(
                     "header, display, decode rates: {:.3}, {:.3}, {:.3}",
-                    header_rate, display_rate, decode_rate
+                    header_rate, max_show_rate, decode_rate
                 );
 
                 println!(
@@ -256,7 +276,7 @@ fn main() -> Result<()> {
                         Tier::High
                     },
                     pic_size: (sh.max_frame_width as u16, sh.max_frame_height as u16), // (width, height)
-                    display_rate: display_rate.round() as u64 * picture_size as u64,
+                    display_rate: max_show_rate.round() as u64 * picture_size as u64,
                     decode_rate: decode_rate.round() as u64 * picture_size as u64,
                     header_rate: header_rate.round() as u16,
                     mbps: mbps,
