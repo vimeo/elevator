@@ -108,7 +108,7 @@ fn main() -> Result<()> {
     let mut seq_pos = 0;
     let mut seq_sz = 0;
 
-    let mut tiling_info = av1p::obu::TileInfo::default();
+    let (mut max_tile_cols, mut max_tiles) = (0, 0); // the maximum tile parameters
     let mut header_count = 1; // the number of frame and frame header (excluding show_existing_frame) OBUs
     let mut total_size = 0; // the total compressed size of frame, frame header, metadata, and tile group OBUs
     let mut frame_count = 0; // total number of coded frame (i.e. number of frame headers that are not show_existing_frame)
@@ -165,7 +165,8 @@ fn main() -> Result<()> {
                                     seq.rfman.update_process(&fh);
                                 }
 
-                                tiling_info = fh.tile_info;
+                                max_tile_cols = max_tile_cols.max(fh.tile_info.tile_cols);
+                                max_tiles = max_tiles.max(fh.tile_info.tile_cols * fh.tile_info.tile_rows);
 
                                 if fh.show_existing_frame {
                                     header_count += 1;
@@ -240,7 +241,7 @@ fn main() -> Result<()> {
 
                 println!("mbps: {:.3}", mbps);
 
-                println!("tiles: {}x{}", tiling_info.tile_cols, tiling_info.tile_rows);
+                println!("max tile cols: {}, max tiles: {}", max_tile_cols, max_tiles);
             }
 
             // Determine the output level.
@@ -260,7 +261,8 @@ fn main() -> Result<()> {
                     header_rate: header_rate.round() as u16,
                     mbps: mbps,
                     cr: compressed_ratio.round() as u8,
-                    tiles: (tiling_info.tile_cols as u8, tiling_info.tile_rows as u8), // (cols, rows)
+                    tiles: max_tiles as u8,
+                    tile_cols: max_tile_cols as u8,
                 };
 
                 calculate_level(&seq_ctx)

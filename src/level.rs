@@ -20,7 +20,8 @@ pub struct SequenceContext {
     pub header_rate: u16,
     pub mbps: f64,
     pub cr: u8,
-    pub tiles: (u8, u8), // (cols, rows)
+    pub tiles: u8,
+    pub tile_cols: u8,
 }
 
 #[derive(Copy, Clone)]
@@ -366,8 +367,8 @@ pub fn calculate_level(context: &SequenceContext) -> Level {
                 && limits.max_decode_rate >= context.decode_rate
                 && limits.max_header_rate >= context.header_rate
                 && tier_valid
-                && limits.max_tiles >= context.tiles.0 * context.tiles.1
-                && limits.max_tile_cols >= context.tiles.0
+                && limits.max_tiles >= context.tiles
+                && limits.max_tile_cols >= context.tile_cols
             {
                 return *level;
             }
