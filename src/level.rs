@@ -12,6 +12,8 @@ impl Default for Tier {
     }
 }
 
+/// Describes the maximum parameters relevant to level restrictions
+/// encountered in a sequence.
 pub struct SequenceContext {
     pub tier: Tier,
     pub pic_size: (u16, u16), // (width, height)
@@ -19,7 +21,6 @@ pub struct SequenceContext {
     pub decode_rate: u64,
     pub header_rate: u16,
     pub mbps: f64,
-    pub cr: u8,
     pub tiles: u8,
     pub tile_cols: u8,
 }
@@ -350,14 +351,30 @@ pub const LEVELS: [Level; 32] = [
     ),
 ];
 
+pub fn calculate_min_pic_compress_ratio(tier: Tier, display_rate: f64) -> [f64; 32] {
+    let mut min_pic_compress_ratio = [0_f64; 32];
+
+    for i in 0..32 {
+        if let Some(limits) = LEVELS[i].1 {
+            let speed_adjustment = display_rate / limits.max_display_rate as f64;
+            let min_comp_basis = if tier == Tier::Main || i <= 7 { limits.main_cr } else { limits.high_cr };
+
+            // assuming still_picture is equal to 0
+            min_pic_compress_ratio[i] = 0.8_f64.max(min_comp_basis as f64 * speed_adjustment);
+        }
+    }
+
+    min_pic_compress_ratio
+}
+
 pub fn calculate_level(context: &SequenceContext) -> Level {
     for level in LEVELS.iter() {
         if let Some(limits) = level.1 {
             // Only Main tier exists for low levels.
-            let tier_valid = if context.tier == Tier::Main || level.0 <= 7 {
-                limits.main_mbps >= context.mbps && limits.main_cr >= context.cr
+            let mbps_valid = if context.tier == Tier::Main || level.0 <= 7 {
+                limits.main_mbps >= context.mbps
             } else {
-                limits.high_mbps >= context.mbps && limits.high_cr >= context.cr
+                limits.high_mbps >= context.mbps
             };
 
             if limits.max_pic_size >= context.pic_size.0 as u32 * context.pic_size.1 as u32
@@ -366,7 +383,7 @@ pub fn calculate_level(context: &SequenceContext) -> Level {
                 && limits.max_display_rate >= context.display_rate
                 && limits.max_decode_rate >= context.decode_rate
                 && limits.max_header_rate >= context.header_rate
-                && tier_valid
+                && mbps_valid
                 && limits.max_tiles >= context.tiles
                 && limits.max_tile_cols >= context.tile_cols
             {

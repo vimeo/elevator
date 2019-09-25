@@ -109,10 +109,10 @@ fn main() -> Result<()> {
     let mut seq_sz = 0;
 
     let (mut max_tile_cols, mut max_tiles) = (0, 0); // the maximum tile parameters
-    let mut total_size = 0; // the total compressed size of frame, frame header, metadata, and tile group OBUs
-    let mut max_show_rate = 0_f64; // max number of shown frames in a temporal unit (i.e. number of frame headers with show_frame or show_existing_frame)
+    let mut max_display_rate = 0_f64; // max number of shown frames in a temporal unit (i.e. number of frame headers with show_frame or show_existing_frame)
     let mut max_decode_rate = 0_f64; // max number of decoded frames in a temporal unit (i.e. number of frame headers without show_existing_frame)
     let mut max_header_rate = 0_f64; // max number of frame and frame header (excluding show_existing_frame) OBUs in a temporal unit
+    let mut min_cr_level_idx = 0; // minimum level index required to support the compressed ratio bound
 
     match fmt {
         // TODO: move out the generic processing work to support other formats
@@ -120,6 +120,7 @@ fn main() -> Result<()> {
             let header = ivf::parse_ivf_header(&mut reader, input_fname)?;
             let fps = header.framerate as f64 / header.timescale as f64;
             let duration = header.nframes as f64 / fps;
+            let picture_size = header.width as usize * header.height as usize;
 
             if verbose {
                 println!(
@@ -137,11 +138,14 @@ fn main() -> Result<()> {
             let mut header_count = 0; // header count for the current temporal unit
             let mut last_tu_time = 0; // timestamp for the first frame of the last temporal unit
             let mut cur_tu_time = 0; // timestamp for the first frame of the current temporal unit
+            let mut frame_size = 0_i64; // total compressed size for the current frame (includes frame, frame header, metadata, and tile group OBUs)
             let mut seen_frame_header = false; // refreshed with each temporal unit
+            let mut min_compressed_ratio = std::f64::MAX; // min compression ratio for a single frame
 
             // Adapted from av1parser
             while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
                 let mut sz = frame.size;
+
                 let pos = reader.seek(SeekFrom::Current(0))?;
                 while sz > 0 {
                     let obu = av1p::obu::parse_obu_header(&mut reader, sz)?;
@@ -152,53 +156,81 @@ fn main() -> Result<()> {
                     match obu.obu_type {
                         av1p::obu::OBU_TEMPORAL_DELIMITER => {
                             let delta_time = (frame.pts - cur_tu_time) as f64;
-                            max_show_rate = max_show_rate.max(show_count as f64 / delta_time);
+                            let display_rate = show_count as f64 / delta_time;
+                            max_display_rate = max_display_rate.max(display_rate);
                             max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
                             max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
+
+                            if let Some(sh) = seq.sh {
+                                let tier = if sh.op[0].seq_tier == 0 { Tier::Main } else { Tier::High };
+                                let min_pic_compressed_ratio = calculate_min_pic_compress_ratio(tier, display_rate);
+
+                                for level_idx in 0..32 {
+                                    if min_compressed_ratio >= min_pic_compressed_ratio[level_idx] {
+                                        min_cr_level_idx = min_cr_level_idx.max(level_idx);
+                                        break;
+                                    }
+                                }
+                            }
 
                             show_count = 0;
                             frame_count = 0;
                             header_count = 0;
+                            min_compressed_ratio = std::f64::MAX;
                             seen_frame_header = false;
 
                             obu::process_obu(&mut reader, &mut seq, &obu);
                         }
                         av1p::obu::OBU_FRAME_HEADER | av1p::obu::OBU_FRAME => {
-                            if seq.sh.is_none() {
+                            if let Some(sh) = seq.sh {
+                                if obu.obu_type == av1p::obu::OBU_FRAME_HEADER {
+                                    if frame_size > 0 {
+                                        let profile_factor = match sh.seq_profile {
+                                            0 => 15,
+                                            1 => 30,
+                                            _ => 36,
+                                        };
+                                        let uncompressed_size = (picture_size * profile_factor) >> 3; // this assumes a fixed picture size}
+                                        min_compressed_ratio = min_compressed_ratio.min(uncompressed_size as f64 / frame_size as f64);
+                                    }
+
+                                    frame_size = i64::from(obu.obu_size) - 128; // this assumes one frame header per frame, coming before other OBUs for this frame
+                                } else {
+                                    frame_size += i64::from(obu.obu_size);
+                                }
+
+                                if let Some(fh) = av1p::obu::parse_frame_header(
+                                    &mut reader,
+                                    seq.sh.as_ref().unwrap(),
+                                    &mut seq.rfman,
+                                ) {
+                                    if !seen_frame_header {
+                                        last_tu_time = cur_tu_time;
+                                        cur_tu_time = frame.pts;
+                                    }
+                                    seen_frame_header = true;
+
+                                    if fh.show_frame || fh.show_existing_frame {
+                                        show_count += 1;
+
+                                        seq.rfman.output_process(&fh);
+                                    }
+
+                                    if !fh.show_existing_frame {
+                                        header_count += 1; // TODO: detect and do not count duplicate frame headers
+                                        frame_count += 1;
+                                        seq.rfman.update_process(&fh);
+                                    }
+
+                                    max_tile_cols = max_tile_cols.max(fh.tile_info.tile_cols);
+                                    max_tiles = max_tiles.max(fh.tile_info.tile_cols * fh.tile_info.tile_rows);
+                                }
+                            } else {
                                 panic!("frame header found before sequence header");
-                            }
-
-                            total_size += obu.obu_size;
-
-                            if let Some(fh) = av1p::obu::parse_frame_header(
-                                &mut reader,
-                                seq.sh.as_ref().unwrap(),
-                                &mut seq.rfman,
-                            ) {
-                                if !seen_frame_header {
-                                    last_tu_time = cur_tu_time;
-                                    cur_tu_time = frame.pts;
-                                }
-                                seen_frame_header = true;
-
-                                if fh.show_frame || fh.show_existing_frame {
-                                    show_count += 1;
-
-                                    seq.rfman.output_process(&fh);
-                                }
-
-                                if !fh.show_existing_frame {
-                                    header_count += 1; // TODO: detect and do not count duplicate frame headers
-                                    frame_count += 1;
-                                    seq.rfman.update_process(&fh);
-                                }
-
-                                max_tile_cols = max_tile_cols.max(fh.tile_info.tile_cols);
-                                max_tiles = max_tiles.max(fh.tile_info.tile_cols * fh.tile_info.tile_rows);
                             }
                         }
                         av1p::obu::OBU_METADATA | av1p::obu::OBU_TILE_GROUP => {
-                            total_size += obu.obu_size;
+                            frame_size += i64::from(obu.obu_size);
                         }
                         av1p::obu::OBU_SEQUENCE_HEADER => {
                             // Track the start location and size of the sequence header OBU for patching.
@@ -219,42 +251,26 @@ fn main() -> Result<()> {
 
             // Do the final updates for header/display/show rates.
             let delta_time = (cur_tu_time - last_tu_time) as f64;
-            max_show_rate = max_show_rate.max(show_count as f64 / delta_time);
+            max_display_rate = max_display_rate.max(show_count as f64 / delta_time);
             max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
             max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
-
-            let compressed_size = if total_size < 128 {
-                0
-            } else {
-                total_size - 128
-            };
 
             let sh = seq.sh.unwrap(); // sequence header
             if sh.operating_points_cnt > 1 {
                 unimplemented!("multiple operating points are not yet supported");
             }
 
-            let picture_size = header.width as usize * header.height as usize;
-
-            let profile_factor = match sh.seq_profile {
-                0 => 15,
-                1 => 30,
-                _ => 36,
-            };
-            let uncompressed_size = (picture_size * profile_factor) >> 3;
-
-            let compressed_ratio = uncompressed_size as f64 / compressed_size as f64;
-            let mbps = total_size as f64 / duration / 1_000_000.0;
+            let mbps = 0_f64;//total_size as f64 / duration / 1_000_000.0;
 
             if verbose {
                 println!(
                     "max header, display, decode rates: {:.3}, {:.3}, {:.3}",
-                    max_header_rate, max_show_rate, max_decode_rate
+                    max_header_rate, max_display_rate, max_decode_rate
                 );
 
                 println!(
-                    "size: {} uncompressed, {} compressed (CR: {:.3})",
-                    uncompressed_size, compressed_size, compressed_ratio
+                    "minimum level for CR constraints: {}",
+                    LEVELS[min_cr_level_idx]
                 );
 
                 println!("mbps: {:.3}", mbps);
@@ -274,16 +290,15 @@ fn main() -> Result<()> {
                         Tier::High
                     },
                     pic_size: (sh.max_frame_width as u16, sh.max_frame_height as u16), // (width, height)
-                    display_rate: max_show_rate.round() as u64 * picture_size as u64,
-                    decode_rate: max_decode_rate.round() as u64 * picture_size as u64,
-                    header_rate: max_header_rate.round() as u16,
+                    display_rate: (max_display_rate * picture_size as f64).ceil() as u64,
+                    decode_rate: (max_decode_rate * picture_size as f64).ceil() as u64,
+                    header_rate: max_header_rate.ceil() as u16,
                     mbps: mbps,
-                    cr: compressed_ratio.round() as u8,
                     tiles: max_tiles as u8,
                     tile_cols: max_tile_cols as u8,
                 };
 
-                calculate_level(&seq_ctx)
+                LEVELS[usize::from(calculate_level(&seq_ctx).0).max(min_cr_level_idx)]
             };
 
             let old_level = &LEVELS[usize::from(sh.op[0].seq_level_idx)];
