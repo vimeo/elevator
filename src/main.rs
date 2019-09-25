@@ -111,8 +111,8 @@ fn main() -> Result<()> {
     let (mut max_tile_cols, mut max_tiles) = (0, 0); // the maximum tile parameters
     let mut header_count = 1; // the number of frame and frame header (excluding show_existing_frame) OBUs
     let mut total_size = 0; // the total compressed size of frame, frame header, metadata, and tile group OBUs
-    let mut frame_count = 0; // total number of coded frame (i.e. number of frame headers that are not show_existing_frame)
-    let mut max_show_rate = 0_f64; // max number of shown frames (i.e. number of frame headers with show_frame or show_existing_frame)
+    let mut max_show_rate = 0_f64; // max number of shown frames in a temporal unit (i.e. number of frame headers with show_frame or show_existing_frame)
+    let mut max_decode_rate = 0_f64; // max number of decoded frames in a temporal unit (i.e. number of frame headers without show_existing_frame)
 
     match fmt {
         // TODO: move out the generic processing work to support other formats
@@ -133,6 +133,7 @@ fn main() -> Result<()> {
             }
 
             let mut show_count = 0; // shown frame count for the current temporal unit
+            let mut frame_count = 0; // decoded frame count for the current temporal unit
             let mut last_tu_time = 0; // timestamp for the first frame of the last temporal unit
             let mut cur_tu_time = 0; // timestamp for the first frame of the current temporal unit
             let mut seen_frame_header = false; // refreshed with each temporal unit
@@ -149,8 +150,12 @@ fn main() -> Result<()> {
 
                     match obu.obu_type {
                         av1p::obu::OBU_TEMPORAL_DELIMITER => {
-                            max_show_rate = max_show_rate.max(show_count as f64 / (frame.pts - cur_tu_time) as f64);
+                            let delta_time = (frame.pts - cur_tu_time) as f64;
+                            max_show_rate = max_show_rate.max(show_count as f64 / delta_time);
+                            max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
+
                             show_count = 0;
+                            frame_count = 0;
                             seen_frame_header = false;
 
                             obu::process_obu(&mut reader, &mut seq, &obu);
@@ -180,19 +185,13 @@ fn main() -> Result<()> {
                                 }
 
                                 if !fh.show_existing_frame {
+                                    header_count += 1; // TODO: detect and do not count duplicate frame headers
+                                    frame_count += 1;
                                     seq.rfman.update_process(&fh);
                                 }
 
                                 max_tile_cols = max_tile_cols.max(fh.tile_info.tile_cols);
                                 max_tiles = max_tiles.max(fh.tile_info.tile_cols * fh.tile_info.tile_rows);
-
-                                if fh.show_existing_frame {
-                                    header_count += 1;
-                                } else {
-                                    frame_count += 1;
-                                }
-                            } else {
-                                header_count += 1;
                             }
                         }
                         av1p::obu::OBU_METADATA | av1p::obu::OBU_TILE_GROUP => {
@@ -216,7 +215,9 @@ fn main() -> Result<()> {
             }
 
             // Do the final updates for header/display/show rates.
-            max_show_rate = max_show_rate.max(show_count as f64 / (cur_tu_time - last_tu_time) as f64);
+            let delta_time = (cur_tu_time - last_tu_time) as f64;
+            max_show_rate = max_show_rate.max(show_count as f64 / delta_time);
+            max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
 
             let compressed_size = if total_size < 128 {
                 0
@@ -239,19 +240,13 @@ fn main() -> Result<()> {
             let uncompressed_size = (picture_size * profile_factor) >> 3;
 
             let header_rate = header_count as f64 / duration;
-            let decode_rate = frame_count as f64 / duration;
             let compressed_ratio = uncompressed_size as f64 / compressed_size as f64;
             let mbps = total_size as f64 / duration / 1_000_000.0;
 
             if verbose {
                 println!(
-                    "counted decoded frames: {}",
-                    frame_count
-                );
-
-                println!(
                     "header, display, decode rates: {:.3}, {:.3}, {:.3}",
-                    header_rate, max_show_rate, decode_rate
+                    header_rate, max_show_rate, max_decode_rate
                 );
 
                 println!(
@@ -277,7 +272,7 @@ fn main() -> Result<()> {
                     },
                     pic_size: (sh.max_frame_width as u16, sh.max_frame_height as u16), // (width, height)
                     display_rate: max_show_rate.round() as u64 * picture_size as u64,
-                    decode_rate: decode_rate.round() as u64 * picture_size as u64,
+                    decode_rate: max_decode_rate.round() as u64 * picture_size as u64,
                     header_rate: header_rate.round() as u16,
                     mbps: mbps,
                     cr: compressed_ratio.round() as u8,
