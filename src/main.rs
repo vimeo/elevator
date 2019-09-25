@@ -113,6 +113,7 @@ fn main() -> Result<()> {
     let mut max_decode_rate = 0_f64; // max number of decoded frames in a temporal unit (i.e. number of frame headers without show_existing_frame)
     let mut max_header_rate = 0_f64; // max number of frame and frame header (excluding show_existing_frame) OBUs in a temporal unit
     let mut min_cr_level_idx = 0; // minimum level index required to support the compressed ratio bound
+    let mut max_mbps = 0_f64; // max bitrate in megabits per second
 
     match fmt {
         // TODO: move out the generic processing work to support other formats
@@ -139,12 +140,14 @@ fn main() -> Result<()> {
             let mut last_tu_time = 0; // timestamp for the first frame of the last temporal unit
             let mut cur_tu_time = 0; // timestamp for the first frame of the current temporal unit
             let mut frame_size = 0_i64; // total compressed size for the current frame (includes frame, frame header, metadata, and tile group OBUs)
+            let mut tu_size = 0; // total size of for the current temporal unit
             let mut seen_frame_header = false; // refreshed with each temporal unit
             let mut min_compressed_ratio = std::f64::MAX; // min compression ratio for a single frame
 
             // Adapted from av1parser
             while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
                 let mut sz = frame.size;
+                tu_size += sz;
 
                 let pos = reader.seek(SeekFrom::Current(0))?;
                 while sz > 0 {
@@ -156,10 +159,17 @@ fn main() -> Result<()> {
                     match obu.obu_type {
                         av1p::obu::OBU_TEMPORAL_DELIMITER => {
                             let delta_time = (frame.pts - cur_tu_time) as f64;
+                            if delta_time == 0.0 {
+                                continue;
+                            }
+
                             let display_rate = show_count as f64 / delta_time;
                             max_display_rate = max_display_rate.max(display_rate);
                             max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
                             max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
+                            // TODO: compute Mbps using tile list OBUs instead (see A.4).
+                            let mbps = tu_size as f64 / delta_time * 8.0 / 1_000_000.0;
+                            max_mbps = max_mbps.max(mbps);
 
                             if let Some(sh) = seq.sh {
                                 let tier = if sh.op[0].seq_tier == 0 { Tier::Main } else { Tier::High };
@@ -178,6 +188,7 @@ fn main() -> Result<()> {
                             header_count = 0;
                             min_compressed_ratio = std::f64::MAX;
                             seen_frame_header = false;
+                            tu_size = 0;
 
                             obu::process_obu(&mut reader, &mut seq, &obu);
                         }
@@ -251,16 +262,27 @@ fn main() -> Result<()> {
 
             // Do the final updates for header/display/show rates.
             let delta_time = (cur_tu_time - last_tu_time) as f64;
-            max_display_rate = max_display_rate.max(show_count as f64 / delta_time);
+            let display_rate = show_count as f64 / delta_time;
+            max_display_rate = max_display_rate.max(display_rate);
             max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
             max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
+            let mbps = tu_size as f64 / delta_time * 8.0 * 1_000_000.0;
+            max_mbps = max_mbps.max(mbps);
 
             let sh = seq.sh.unwrap(); // sequence header
+            let tier = if sh.op[0].seq_tier == 0 { Tier::Main } else { Tier::High };
+            let min_pic_compressed_ratio = calculate_min_pic_compress_ratio(tier, display_rate);
+
+            for level_idx in 0..32 {
+                if min_compressed_ratio >= min_pic_compressed_ratio[level_idx] {
+                    min_cr_level_idx = min_cr_level_idx.max(level_idx);
+                    break;
+                }
+            }
+
             if sh.operating_points_cnt > 1 {
                 unimplemented!("multiple operating points are not yet supported");
             }
-
-            let mbps = 0_f64;//total_size as f64 / duration / 1_000_000.0;
 
             if verbose {
                 println!(
@@ -273,7 +295,7 @@ fn main() -> Result<()> {
                     LEVELS[min_cr_level_idx]
                 );
 
-                println!("mbps: {:.3}", mbps);
+                println!("max mbps: {:.3}", max_mbps);
 
                 println!("max tile cols: {}, max tiles: {}", max_tile_cols, max_tiles);
             }
@@ -293,7 +315,7 @@ fn main() -> Result<()> {
                     display_rate: (max_display_rate * picture_size as f64).ceil() as u64,
                     decode_rate: (max_decode_rate * picture_size as f64).ceil() as u64,
                     header_rate: max_header_rate.ceil() as u16,
-                    mbps: mbps,
+                    mbps: max_mbps,
                     tiles: max_tiles as u8,
                     tile_cols: max_tile_cols as u8,
                 };
