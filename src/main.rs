@@ -156,9 +156,7 @@ fn main() -> Result<()> {
                                 &mut seq.rfman,
                             ) {
                                 if fh.show_frame || fh.show_existing_frame {
-                                    if obu.obu_type == av1p::obu::OBU_FRAME_HEADER {
-                                        shown_frame_count += 1;
-                                    }
+                                    shown_frame_count += 1;
 
                                     seq.rfman.output_process(&fh);
                                 }
@@ -167,17 +165,15 @@ fn main() -> Result<()> {
                                     seq.rfman.update_process(&fh);
                                 }
 
-                                if obu.obu_type == av1p::obu::OBU_FRAME_HEADER {
-                                    tiling_info = fh.tile_info;
+                                tiling_info = fh.tile_info;
 
-                                    if fh.show_existing_frame {
-                                        header_count += 1;
-                                    } else {
-                                        frame_count += 1;
-                                    }
-                                } else {
+                                if fh.show_existing_frame {
                                     header_count += 1;
+                                } else {
+                                    frame_count += 1;
                                 }
+                            } else {
+                                header_count += 1;
                             }
                         }
                         av1p::obu::OBU_METADATA | av1p::obu::OBU_TILE_GROUP => {
