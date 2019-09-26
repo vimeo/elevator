@@ -197,13 +197,13 @@ fn process_input(config: &AppConfig) -> Result<()> {
                                 continue;
                             }
 
-                            let tu_delta_time = (frame.pts - cur_tu_time) as f64 / fps;
+                            let delta_time = (frame.pts - cur_tu_time) as f64 / fps;
 
-                            let display_rate = show_count as f64 / tu_delta_time;
+                            let display_rate = show_count as f64 / delta_time;
                             max_display_rate = max_display_rate.max(display_rate);
                             max_decode_rate =
-                                max_decode_rate.max(frame_count as f64 / tu_delta_time);
-                            //max_header_rate = max_header_rate.max(header_count as f64 / tu_delta_time);
+                                max_decode_rate.max(frame_count as f64 / delta_time);
+                            //max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
 
                             // Calculate bitrate and header rate, windowed over one second (sampled every frame).
                             // We assume that header rate is computed over one-second windows.
