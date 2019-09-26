@@ -115,7 +115,8 @@ fn main() -> Result<()> {
     let mut max_header_rate = 0_f64; // max number of frame and frame header (excluding show_existing_frame) OBUs in a temporal unit
     let mut min_cr_level_idx = 0; // minimum level index required to support the compressed ratio bound
     let mut max_mbps = 0_f64; // max bitrate in megabits per second
-    let mut max_tile_list_bitrate = 0;
+    let mut max_tile_list_bitrate = 0; // max bitrate for tile lists
+    let mut max_tile_decode_rate = 0_f64; // max decode rate for tile lists
 
     match fmt {
         // TODO: move out the generic processing work to support other formats
@@ -148,6 +149,7 @@ fn main() -> Result<()> {
             let mut header_counts = VecDeque::<u32>::new(); // one-second buffer for number of headers per temporal unit
             let mut seen_frame_header = false; // refreshed with each temporal unit
             let mut min_compressed_ratio = std::f64::MAX; // min compression ratio for a single frame
+            let mut tile_info = av1p::obu::TileInfo::default(); // last seen tile information
 
             let mut total_show_count = 0; // total number of displayed frames
 
@@ -175,7 +177,8 @@ fn main() -> Result<()> {
 
                             let display_rate = show_count as f64 / tu_delta_time;
                             max_display_rate = max_display_rate.max(display_rate);
-                            max_decode_rate = max_decode_rate.max(frame_count as f64 / tu_delta_time);
+                            max_decode_rate =
+                                max_decode_rate.max(frame_count as f64 / tu_delta_time);
                             //max_header_rate = max_header_rate.max(header_count as f64 / tu_delta_time);
 
                             // Calculate bitrate and header rate, windowed over one second (sampled every frame).
@@ -189,7 +192,8 @@ fn main() -> Result<()> {
                                     header_counts.pop_front();
                                 }
 
-                                let header_rate = header_counts.iter().sum::<u32>() as f64 * (fps / header_counts.len() as f64);
+                                let header_rate = header_counts.iter().sum::<u32>() as f64
+                                    * (fps / header_counts.len() as f64);
                                 max_header_rate = max_header_rate.max(header_rate);
                             }
 
@@ -198,7 +202,10 @@ fn main() -> Result<()> {
                                     tu_sizes.pop_front();
                                 }
 
-                                let mbps = tu_sizes.iter().sum::<u32>() as f64 * (fps / tu_sizes.len() as f64) * 8.0 / 1_000_000.0;
+                                let mbps = tu_sizes.iter().sum::<u32>() as f64
+                                    * (fps / tu_sizes.len() as f64)
+                                    * 8.0
+                                    / 1_000_000.0;
                                 max_mbps = max_mbps.max(mbps);
                             }
 
@@ -275,6 +282,7 @@ fn main() -> Result<()> {
                                         seq.rfman.update_process(&fh);
                                     }
 
+                                    tile_info = fh.tile_info;
                                     max_tile_cols = max_tile_cols.max(fh.tile_info.tile_cols);
                                     max_tiles = max_tiles
                                         .max(fh.tile_info.tile_cols * fh.tile_info.tile_rows);
@@ -295,7 +303,15 @@ fn main() -> Result<()> {
                                     bytes_per_tile_list += entry.tile_data_size_minus_1 + 1;
                                 }
 
-                                max_tile_list_bitrate = max_tile_list_bitrate.max(bytes_per_tile_list * 8 * 180);
+                                max_tile_list_bitrate =
+                                    max_tile_list_bitrate.max(bytes_per_tile_list * 8 * 180);
+                                max_tile_decode_rate = max_tile_decode_rate.max(
+                                    header.width as f64 / tile_info.tile_cols as f64
+                                        * header.height as f64
+                                        / tile_info.tile_rows as f64
+                                        * (tile_list.tile_count_minus_1 + 1) as f64
+                                        * 180.0,
+                                );
                             }
                         }
                         av1p::obu::OBU_SEQUENCE_HEADER => {
@@ -319,7 +335,10 @@ fn main() -> Result<()> {
             let delta_time = (cur_tu_time - last_tu_time) as f64 / fps;
             let display_rate = show_count as f64 / delta_time;
             max_display_rate = max_display_rate.max(display_rate);
-            max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
+            max_decode_rate = max_decode_rate
+                .max(frame_count as f64 / delta_time)
+                // Tile decode rate is restricted to the level's maximum decode rate halved, so double the input to achieve that effect.
+                .max(max_tile_decode_rate * 2.0);
 
             header_counts.push_back(header_count);
             tu_sizes.push_back(tu_size);
@@ -328,15 +347,19 @@ fn main() -> Result<()> {
                 header_counts.pop_front();
             }
 
-            let header_rate = header_counts.iter().sum::<u32>() as f64 * (fps / header_counts.len() as f64);
+            let header_rate =
+                header_counts.iter().sum::<u32>() as f64 * (fps / header_counts.len() as f64);
             max_header_rate = max_header_rate.max(header_rate);
 
             while tu_sizes.len() > one_second {
                 tu_sizes.pop_front();
             }
 
-            let mbps = tu_sizes.iter().sum::<u32>() as f64 * (fps / tu_sizes.len() as f64) * 8.0 / 1_000_000.0;
-            max_mbps = max_mbps.max(mbps).max(max_tile_list_bitrate as f64 / 1_000_000.0);
+            let mbps = tu_sizes.iter().sum::<u32>() as f64 * (fps / tu_sizes.len() as f64) * 8.0
+                / 1_000_000.0;
+            max_mbps = max_mbps
+                .max(mbps)
+                .max(max_tile_list_bitrate as f64 / 1_000_000.0);
 
             let sh = seq.sh.unwrap(); // sequence header
             let tier = if sh.op[0].seq_tier == 0 {
