@@ -125,13 +125,13 @@ fn main() -> Result<()> {
 
             if verbose {
                 println!(
-                    "time scale, frame rate, number of frames: {}, {}, {} ({:.3} fps, {:.3} seconds)",
+                    "header-reported resolution: {}x{}",
+                    header.width, header.height
+                );
+                println!(
+                    "header-reported time scale, frame rate, number of frames: {}, {}, {} ({:.3} fps, {:.3} seconds)",
                     header.timescale, header.framerate, header.nframes, fps, duration
                 );
-            }
-
-            if header.nframes == 0 {
-                unimplemented!("frame counting not yet supported");
             }
 
             let mut show_count = 0; // shown frame count for the current temporal unit
@@ -143,6 +143,8 @@ fn main() -> Result<()> {
             let mut tu_size = 0; // total size of for the current temporal unit
             let mut seen_frame_header = false; // refreshed with each temporal unit
             let mut min_compressed_ratio = std::f64::MAX; // min compression ratio for a single frame
+
+            let mut total_show_count = 0; // total number of displayed frames
 
             // Adapted from av1parser
             while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
@@ -172,8 +174,13 @@ fn main() -> Result<()> {
                             max_mbps = max_mbps.max(mbps);
 
                             if let Some(sh) = seq.sh {
-                                let tier = if sh.op[0].seq_tier == 0 { Tier::Main } else { Tier::High };
-                                let min_pic_compressed_ratio = calculate_min_pic_compress_ratio(tier, display_rate);
+                                let tier = if sh.op[0].seq_tier == 0 {
+                                    Tier::Main
+                                } else {
+                                    Tier::High
+                                };
+                                let min_pic_compressed_ratio =
+                                    calculate_min_pic_compress_ratio(tier, display_rate);
 
                                 for level_idx in 0..32 {
                                     if min_compressed_ratio >= min_pic_compressed_ratio[level_idx] {
@@ -182,6 +189,8 @@ fn main() -> Result<()> {
                                     }
                                 }
                             }
+
+                            total_show_count += show_count;
 
                             show_count = 0;
                             frame_count = 0;
@@ -201,8 +210,10 @@ fn main() -> Result<()> {
                                             1 => 30,
                                             _ => 36,
                                         };
-                                        let uncompressed_size = (picture_size * profile_factor) >> 3; // this assumes a fixed picture size}
-                                        min_compressed_ratio = min_compressed_ratio.min(uncompressed_size as f64 / frame_size as f64);
+                                        let uncompressed_size =
+                                            (picture_size * profile_factor) >> 3; // this assumes a fixed picture size}
+                                        min_compressed_ratio = min_compressed_ratio
+                                            .min(uncompressed_size as f64 / frame_size as f64);
                                     }
 
                                     frame_size = i64::from(obu.obu_size) - 128; // this assumes one frame header per frame, coming before other OBUs for this frame
@@ -234,7 +245,8 @@ fn main() -> Result<()> {
                                     }
 
                                     max_tile_cols = max_tile_cols.max(fh.tile_info.tile_cols);
-                                    max_tiles = max_tiles.max(fh.tile_info.tile_cols * fh.tile_info.tile_rows);
+                                    max_tiles = max_tiles
+                                        .max(fh.tile_info.tile_cols * fh.tile_info.tile_rows);
                                 }
                             } else {
                                 panic!("frame header found before sequence header");
@@ -270,7 +282,11 @@ fn main() -> Result<()> {
             max_mbps = max_mbps.max(mbps);
 
             let sh = seq.sh.unwrap(); // sequence header
-            let tier = if sh.op[0].seq_tier == 0 { Tier::Main } else { Tier::High };
+            let tier = if sh.op[0].seq_tier == 0 {
+                Tier::Main
+            } else {
+                Tier::High
+            };
             let min_pic_compressed_ratio = calculate_min_pic_compress_ratio(tier, display_rate);
 
             for level_idx in 0..32 {
@@ -280,11 +296,15 @@ fn main() -> Result<()> {
                 }
             }
 
+            total_show_count += show_count;
+
             if sh.operating_points_cnt > 1 {
                 unimplemented!("multiple operating points are not yet supported");
             }
 
             if verbose {
+                println!("counted number of displayed frames: {}", total_show_count);
+
                 println!(
                     "max header, display, decode rates: {:.3}, {:.3}, {:.3}",
                     max_header_rate, max_display_rate, max_decode_rate

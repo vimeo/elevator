@@ -357,7 +357,11 @@ pub fn calculate_min_pic_compress_ratio(tier: Tier, display_rate: f64) -> [f64; 
     for i in 0..32 {
         if let Some(limits) = LEVELS[i].1 {
             let speed_adjustment = display_rate / limits.max_display_rate as f64;
-            let min_comp_basis = if tier == Tier::Main || i <= 7 { limits.main_cr } else { limits.high_cr };
+            let min_comp_basis = if tier == Tier::Main || i <= 7 {
+                limits.main_cr
+            } else {
+                limits.high_cr
+            };
 
             // assuming still_picture is equal to 0
             min_pic_compress_ratio[i] = 0.8_f64.max(min_comp_basis as f64 * speed_adjustment);
