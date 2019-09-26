@@ -161,10 +161,12 @@ fn main() -> Result<()> {
 
                     match obu.obu_type {
                         av1p::obu::OBU_TEMPORAL_DELIMITER => {
-                            let delta_time = (frame.pts - cur_tu_time) as f64;
-                            if delta_time == 0.0 {
+                            if frame.pts == cur_tu_time {
+                                // duplicate temporal delimiter?
                                 continue;
                             }
+
+                            let delta_time = (frame.pts - cur_tu_time) as f64 / fps;
 
                             let display_rate = show_count as f64 / delta_time;
                             max_display_rate = max_display_rate.max(display_rate);
@@ -274,7 +276,7 @@ fn main() -> Result<()> {
             }
 
             // Do the final updates for header/display/show rates.
-            let delta_time = (cur_tu_time - last_tu_time) as f64;
+            let delta_time = (cur_tu_time - last_tu_time) as f64 / fps;
             let display_rate = show_count as f64 / delta_time;
             max_display_rate = max_display_rate.max(display_rate);
             max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
