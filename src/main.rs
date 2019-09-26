@@ -114,6 +114,7 @@ fn main() -> Result<()> {
     let mut max_header_rate = 0_f64; // max number of frame and frame header (excluding show_existing_frame) OBUs in a temporal unit
     let mut min_cr_level_idx = 0; // minimum level index required to support the compressed ratio bound
     let mut max_mbps = 0_f64; // max bitrate in megabits per second
+    let mut max_tile_list_bitrate = 0;
 
     match fmt {
         // TODO: move out the generic processing work to support other formats
@@ -258,6 +259,17 @@ fn main() -> Result<()> {
                         av1p::obu::OBU_METADATA | av1p::obu::OBU_TILE_GROUP => {
                             frame_size += i64::from(obu.obu_size);
                         }
+                        av1p::obu::OBU_TILE_LIST => {
+                            if let Some(tile_list) = av1p::obu::parse_tile_list(&mut reader) {
+                                let mut bytes_per_tile_list = 0;
+
+                                for entry in tile_list.tile_list_entries {
+                                    bytes_per_tile_list += entry.tile_data_size_minus_1 + 1;
+                                }
+
+                                max_tile_list_bitrate = max_tile_list_bitrate.max(bytes_per_tile_list * 8 * 180);
+                            }
+                        }
                         av1p::obu::OBU_SEQUENCE_HEADER => {
                             // Track the start location and size of the sequence header OBU for patching.
                             seq_pos = pos;
@@ -283,6 +295,8 @@ fn main() -> Result<()> {
             max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
             let mbps = tu_size as f64 / delta_time * 8.0 / 1_000_000.0;
             max_mbps = max_mbps.max(mbps);
+
+            max_mbps = max_mbps.max(max_tile_list_bitrate as f64 / 1_000_000.0);
 
             let sh = seq.sh.unwrap(); // sequence header
             let tier = if sh.op[0].seq_tier == 0 {
