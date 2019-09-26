@@ -9,4 +9,3 @@ edition = "2018"
 [dependencies]
 av1parser = { git = "https://github.com/rzumer/av1parser", branch = "tile-list-obu" }
 clap = "~2.33"
-same-file = "1"

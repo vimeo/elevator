@@ -1,6 +1,5 @@
 extern crate av1parser;
 extern crate clap;
-extern crate same_file;
 
 mod ivf;
 mod level;
@@ -9,10 +8,23 @@ mod obu;
 use av1parser as av1p;
 use clap::{App, Arg};
 use level::*;
-use same_file::is_same_file;
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
+
+#[derive(PartialEq)]
+enum Output<'a> {
+    InPlace,
+    File(&'a str),
+    CommandLine,
+}
+
+struct AppConfig<'a> {
+    verbose: bool,
+    input: &'a str,
+    output: Output<'a>,
+    forced_level: Option<Level>,
+}
 
 fn main() -> Result<()> {
     /// Shortcut for fetching a Cargo environment variable.
@@ -74,28 +86,40 @@ fn main() -> Result<()> {
         panic!("cannot specify an output file and in-place at the same time");
     }
 
-    let verbose = matches.is_present("verbose");
-
-    let input_fname = matches.value_of("input").unwrap();
-    let output_fname = matches.value_of("output").unwrap_or(input_fname);
-
-    let inplace = matches.is_present("inplace")
-        || matches.is_present("output") && is_same_file(input_fname, output_fname)?;
-
-    let has_output_file = matches.is_present("output") || matches.is_present("inplace");
-
-    let forced_level = if let Some(forced_level_str) = matches.value_of("forcedlevel") {
-        // The value is guaranteed to be valid, as it is validated by clap (`possible_values()`).
-        Some(LEVELS[forced_level_str.parse::<usize>().unwrap()])
-    } else {
-        None
+    let config = AppConfig {
+        verbose: matches.is_present("verbose"),
+        input: matches.value_of("input").unwrap(),
+        output: if matches.is_present("output") {
+            Output::File(matches.value_of("output").unwrap())
+        } else if matches.is_present("inplace") {
+            Output::InPlace
+        } else {
+            Output::CommandLine
+        },
+        forced_level: if matches.is_present("forcedlevel") {
+            Some(
+                LEVELS[matches
+                    .value_of("forcedlevel")
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap()],
+            )
+        } else {
+            None
+        },
     };
 
+    process_input(&config)?;
+
+    Ok(())
+}
+
+fn process_input(config: &AppConfig) -> Result<()> {
     // Open the specified input file using a buffered reader.
     let input_file = OpenOptions::new()
         .read(true)
-        .write(inplace)
-        .open(input_fname)
+        .write(config.output == Output::InPlace)
+        .open(config.input)
         .expect("could not open the specified input file");
     let output_file: File;
 
@@ -122,12 +146,12 @@ fn main() -> Result<()> {
         // TODO: move out the generic processing work to support other formats
         // TODO: do not parse the whole stream if setting a level manually
         av1p::FileFormat::IVF => {
-            let header = ivf::parse_ivf_header(&mut reader, input_fname)?;
+            let header = ivf::parse_ivf_header(&mut reader, config.input)?;
             let fps = header.framerate as f64 / header.timescale as f64;
             let duration = header.nframes as f64 / fps;
             let picture_size = header.width as usize * header.height as usize;
 
-            if verbose {
+            if config.verbose {
                 println!(
                     "header-reported resolution: {}x{}",
                     header.width, header.height
@@ -382,7 +406,7 @@ fn main() -> Result<()> {
                 unimplemented!("multiple operating points are not yet supported");
             }
 
-            if verbose {
+            if config.verbose {
                 println!("counted number of displayed frames: {}", total_show_count);
 
                 println!(
@@ -401,8 +425,8 @@ fn main() -> Result<()> {
             }
 
             // Determine the output level.
-            let level: Level = if forced_level.is_some() {
-                forced_level.unwrap()
+            let level: Level = if config.forced_level.is_some() {
+                config.forced_level.unwrap()
             } else {
                 // Generate a SequenceContext using the parsed data.
                 let seq_ctx = SequenceContext {
@@ -420,7 +444,7 @@ fn main() -> Result<()> {
                     tile_cols: max_tile_cols as u8,
                 };
 
-                if verbose {
+                if config.verbose {
                     println!();
                     println!("Sequence context:");
                     println!("{}", seq_ctx);
@@ -431,10 +455,16 @@ fn main() -> Result<()> {
             let old_level = &LEVELS[usize::from(sh.op[0].seq_level_idx)];
 
             // Replace the level, if the output is to a file.
-            if has_output_file {
+            if config.output != Output::CommandLine {
                 // Copy the file contents from input to output if needed.
-                if !inplace {
-                    std::fs::copy(input_fname, output_fname)?;
+                let output_fname = match config.output {
+                    Output::InPlace => config.input,
+                    Output::File(fname) => fname,
+                    _ => unreachable!(),
+                };
+
+                if config.output == Output::File(output_fname) {
+                    std::fs::copy(config.input, output_fname)?;
                 }
 
                 // Locate the first level byte by simply counting the bits that come before it.
@@ -479,7 +509,7 @@ fn main() -> Result<()> {
                     (((0b1111_1111_1111_1111) << 3 >> lv_bit_offset_in_byte >> 8 >> 1) as u16)
                         .to_be_bytes();
 
-                if verbose {
+                if config.verbose {
                     println!(
                         "offset: {} | level bits: {:#010b}, {:#010b}",
                         lv_bit_offset_in_byte, level_aligned[0], level_aligned[1]
@@ -505,7 +535,7 @@ fn main() -> Result<()> {
                     "level at the location seeked to patch does not match the parsed value"
                 );
 
-                if verbose {
+                if config.verbose {
                     print!(
                         "input/output bytes: {:#010b}, {:#010b} / ",
                         byte_buf[0], byte_buf[1]
@@ -556,7 +586,7 @@ fn main() -> Result<()> {
                 byte_buf[1] = level_aligned[1]
                     | (tier_adjusted_bits[1] & (tier_bit_mask[1] | post_tier_bit_mask[1]));
 
-                if verbose {
+                if config.verbose {
                     println!("{:#010b}, {:#010b}", byte_buf[0], byte_buf[1]);
                 }
 
