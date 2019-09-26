@@ -356,6 +356,7 @@ fn process_input(config: &AppConfig) -> Result<()> {
             }
 
             // Do the final updates for header/display/show rates.
+
             // Single frame clips don't move forward in time, so set a minimum delta of the framerate's inverse.
             let delta_time = ((cur_tu_time - last_tu_time) as f64 / fps).max(1.0 / fps);
             let display_rate = show_count as f64 / delta_time;
@@ -372,15 +373,16 @@ fn process_input(config: &AppConfig) -> Result<()> {
                 header_counts.pop_front();
             }
 
+            // For short clips, scale only the denominator (time scale), not the numerator (headers/bits).
             let header_rate =
-                header_counts.iter().sum::<u32>() as f64 * (fps / header_counts.len() as f64);
+                header_counts.iter().sum::<u32>() as f64 * (one_second as f64 / fps);
             max_header_rate = max_header_rate.max(header_rate);
 
             while tu_sizes.len() > one_second {
                 tu_sizes.pop_front();
             }
 
-            let mbps = tu_sizes.iter().sum::<u32>() as f64 * (fps / tu_sizes.len() as f64) * 8.0
+            let mbps = tu_sizes.iter().sum::<u32>() as f64 * (one_second as f64 / fps) * 8.0
                 / 1_000_000.0;
             max_mbps = max_mbps
                 .max(mbps)
