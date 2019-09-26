@@ -279,7 +279,7 @@ fn main() -> Result<()> {
             max_display_rate = max_display_rate.max(display_rate);
             max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
             max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
-            let mbps = tu_size as f64 / delta_time * 8.0 * 1_000_000.0;
+            let mbps = tu_size as f64 / delta_time * 8.0 / 1_000_000.0;
             max_mbps = max_mbps.max(mbps);
 
             let sh = seq.sh.unwrap(); // sequence header
