@@ -55,7 +55,7 @@ fn main() -> Result<()> {
         )
         .arg(
             Arg::with_name("forcedlevel")
-                .short("l")
+                .short("f")
                 .long("forcedlevel")
                 .value_name("FORCED_LEVEL")
                 .help("Force a level instead of calculating it")
