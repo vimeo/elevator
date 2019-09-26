@@ -10,6 +10,7 @@ use av1parser as av1p;
 use clap::{App, Arg};
 use level::*;
 use same_file::is_same_file;
+use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
 
@@ -142,16 +143,30 @@ fn main() -> Result<()> {
             let mut last_tu_time = 0; // timestamp for the first frame of the last temporal unit
             let mut cur_tu_time = 0; // timestamp for the first frame of the current temporal unit
             let mut frame_size = 0_i64; // total compressed size for the current frame (includes frame, frame header, metadata, and tile group OBUs)
-            let mut tu_size = 0; // total size of for the current temporal unit
+            let mut frame_sizes = VecDeque::<u32>::new(); // one-second buffer for bitrate calculation
+            let mut header_counts = VecDeque::<u32>::new(); // one-second buffer for number of headers per frame
             let mut seen_frame_header = false; // refreshed with each temporal unit
             let mut min_compressed_ratio = std::f64::MAX; // min compression ratio for a single frame
 
             let mut total_show_count = 0; // total number of displayed frames
 
+            let one_second = fps.ceil() as usize;
+
             // Adapted from av1parser
             while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
                 let mut sz = frame.size;
-                tu_size += sz;
+
+                frame_sizes.push_back(sz);
+
+                // Calculate bitrate, windowed over one second (sampled every frame).
+                if frame_sizes.len() >= one_second {
+                    while frame_sizes.len() > one_second {
+                        frame_sizes.pop_front();
+                    }
+
+                    let mbps = frame_sizes.iter().sum::<u32>() as f64 * (fps / frame_sizes.len() as f64) * 8.0 / 1_000_000.0;
+                    max_mbps = max_mbps.max(mbps);
+                }
 
                 let pos = reader.seek(SeekFrom::Current(0))?;
                 while sz > 0 {
@@ -167,15 +182,25 @@ fn main() -> Result<()> {
                                 continue;
                             }
 
-                            let delta_time = (frame.pts - cur_tu_time) as f64 / fps;
+                            let tu_delta_time = (frame.pts - cur_tu_time) as f64 / fps;
 
-                            let display_rate = show_count as f64 / delta_time;
+                            let display_rate = show_count as f64 / tu_delta_time;
                             max_display_rate = max_display_rate.max(display_rate);
-                            max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
-                            max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
-                            // TODO: compute Mbps using tile list OBUs instead (see A.4).
-                            let mbps = tu_size as f64 / delta_time * 8.0 / 1_000_000.0;
-                            max_mbps = max_mbps.max(mbps);
+                            max_decode_rate = max_decode_rate.max(frame_count as f64 / tu_delta_time);
+                            //max_header_rate = max_header_rate.max(header_count as f64 / tu_delta_time);
+
+                            // We assume that header rate is computed over one-second windows.
+                            // This is not clear in the specification, but seems implied.
+                            header_counts.push_back(header_count);
+
+                            if header_counts.len() >= one_second {
+                                while header_counts.len() > one_second {
+                                    header_counts.pop_front();
+                                }
+
+                                let header_rate = header_counts.iter().sum::<u32>() as f64 / (fps / frame_sizes.len() as f64);
+                                max_header_rate = max_header_rate.max(header_rate);
+                            }
 
                             if let Some(sh) = seq.sh {
                                 let tier = if sh.op[0].seq_tier == 0 {
@@ -201,7 +226,6 @@ fn main() -> Result<()> {
                             header_count = 0;
                             min_compressed_ratio = std::f64::MAX;
                             seen_frame_header = false;
-                            tu_size = 0;
 
                             obu::process_obu(&mut reader, &mut seq, &obu);
                         }
@@ -292,9 +316,17 @@ fn main() -> Result<()> {
             let display_rate = show_count as f64 / delta_time;
             max_display_rate = max_display_rate.max(display_rate);
             max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
-            max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
-            let mbps = tu_size as f64 / delta_time * 8.0 / 1_000_000.0;
-            max_mbps = max_mbps.max(mbps);
+
+            header_counts.push_back(header_count);
+
+            if header_counts.len() >= one_second {
+                while header_counts.len() > one_second {
+                    header_counts.pop_front();
+                }
+
+                let header_rate = header_counts.iter().sum::<u32>() as f64 / (fps / frame_sizes.len() as f64);
+                max_header_rate = max_header_rate.max(header_rate);
+            }
 
             max_mbps = max_mbps.max(max_tile_list_bitrate as f64 / 1_000_000.0);
 
