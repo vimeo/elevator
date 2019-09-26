@@ -117,6 +117,7 @@ fn main() -> Result<()> {
 
     match fmt {
         // TODO: move out the generic processing work to support other formats
+        // TODO: do not parse the whole stream if setting a level manually
         av1p::FileFormat::IVF => {
             let header = ivf::parse_ivf_header(&mut reader, input_fname)?;
             let fps = header.framerate as f64 / header.timescale as f64;
@@ -340,6 +341,11 @@ fn main() -> Result<()> {
                     tile_cols: max_tile_cols as u8,
                 };
 
+                if verbose {
+                    println!();
+                    println!("Sequence context:");
+                    println!("{}", seq_ctx);
+                }
                 LEVELS[usize::from(calculate_level(&seq_ctx).0).max(min_cr_level_idx)]
             };
 

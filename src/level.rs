@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter, Result};
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Tier {
     Main,
     High,
@@ -23,6 +23,18 @@ pub struct SequenceContext {
     pub mbps: f64,
     pub tiles: u8,
     pub tile_cols: u8,
+}
+
+impl Display for SequenceContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        writeln!(f, "Tier: {:?}", self.tier)?;
+        writeln!(f, "Picture Size: {}x{}", self.pic_size.0, self.pic_size.1)?;
+        writeln!(f, "Display/Decode/Header Rates: {}/{}/{}", self.display_rate, self.decode_rate, self.header_rate)?;
+        writeln!(f, "Mbps: {:.3}", self.mbps)?;
+        writeln!(f, "Tiles/Tile Columns: {}/{}", self.tiles, self.tile_cols)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone)]
