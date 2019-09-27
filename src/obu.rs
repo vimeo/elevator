@@ -3,7 +3,7 @@ use std::io;
 
 // Adapted from av1parser. TODO: clean up/refactor/rewrite
 pub fn process_obu<R: io::Read>(reader: &mut R, seq: &mut av1::Sequence, obu: &obu::Obu) {
-    let reader = &mut io::Read::take(reader, obu.obu_size as u64);
+    let reader = &mut io::Read::take(reader, u64::from(obu.obu_size));
     match obu.obu_type {
         obu::OBU_SEQUENCE_HEADER => {
             if let Some(sh) = obu::parse_sequence_header(reader) {

@@ -9,7 +9,7 @@ pub fn parse_ivf_header<R: io::Read + io::Seek>(
     let mut ivf_header = [0; av1parser::ivf::IVF_HEADER_SIZE];
     reader.read_exact(&mut ivf_header)?;
 
-    match av1parser::ivf::parse_ivf_header(&mut ivf_header) {
+    match av1parser::ivf::parse_ivf_header(&ivf_header) {
         Ok(header) => {
             if header.codec != av1parser::FCC_AV01 {
                 panic!("{}: unsupport codec", fname);

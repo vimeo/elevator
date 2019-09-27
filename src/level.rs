@@ -96,11 +96,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         0,
         LevelLimits {
-            max_pic_size: 147456,
+            max_pic_size: 147_456,
             max_h_size: 2048,
             max_v_size: 1152,
-            max_display_rate: 4423680,
-            max_decode_rate: 5529600,
+            max_display_rate: 4_423_680,
+            max_decode_rate: 5_529_600,
             max_header_rate: 150,
             main_mbps: 1.5,
             high_mbps: 0.0,
@@ -113,11 +113,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         1,
         LevelLimits {
-            max_pic_size: 278784,
+            max_pic_size: 278_784,
             max_h_size: 2816,
             max_v_size: 1584,
-            max_display_rate: 8363520,
-            max_decode_rate: 10454400,
+            max_display_rate: 8_363_520,
+            max_decode_rate: 10_454_400,
             max_header_rate: 150,
             main_mbps: 3.0,
             high_mbps: 0.0,
@@ -132,11 +132,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         4,
         LevelLimits {
-            max_pic_size: 665856,
+            max_pic_size: 665_856,
             max_h_size: 4352,
             max_v_size: 2448,
-            max_display_rate: 19975680,
-            max_decode_rate: 24969600,
+            max_display_rate: 19_975_680,
+            max_decode_rate: 24_969_600,
             max_header_rate: 150,
             main_mbps: 6.0,
             high_mbps: 0.0,
@@ -149,11 +149,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         5,
         LevelLimits {
-            max_pic_size: 1065024,
+            max_pic_size: 1_065_024,
             max_h_size: 5504,
             max_v_size: 3096,
-            max_display_rate: 31950720,
-            max_decode_rate: 39938400,
+            max_display_rate: 31_950_720,
+            max_decode_rate: 39_938_400,
             max_header_rate: 150,
             main_mbps: 10.0,
             high_mbps: 0.0,
@@ -168,11 +168,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         8,
         LevelLimits {
-            max_pic_size: 2359296,
+            max_pic_size: 2_359_296,
             max_h_size: 6144,
             max_v_size: 3456,
-            max_display_rate: 70778880,
-            max_decode_rate: 77856768,
+            max_display_rate: 70_778_880,
+            max_decode_rate: 77_856_768,
             max_header_rate: 300,
             main_mbps: 12.0,
             high_mbps: 30.0,
@@ -185,11 +185,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         9,
         LevelLimits {
-            max_pic_size: 2359296,
+            max_pic_size: 2_359_296,
             max_h_size: 6144,
             max_v_size: 3456,
-            max_display_rate: 141557760,
-            max_decode_rate: 155713536,
+            max_display_rate: 141_557_760,
+            max_decode_rate: 155_713_536,
             max_header_rate: 300,
             main_mbps: 20.0,
             high_mbps: 50.0,
@@ -204,11 +204,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         12,
         LevelLimits {
-            max_pic_size: 8912896,
+            max_pic_size: 8_912_896,
             max_h_size: 8192,
             max_v_size: 4352,
-            max_display_rate: 267386880,
-            max_decode_rate: 273715200,
+            max_display_rate: 267_386_880,
+            max_decode_rate: 273_715_200,
             max_header_rate: 300,
             main_mbps: 30.0,
             high_mbps: 100.0,
@@ -221,11 +221,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         13,
         LevelLimits {
-            max_pic_size: 8912896,
+            max_pic_size: 8_912_896,
             max_h_size: 8192,
             max_v_size: 4352,
-            max_display_rate: 534773760,
-            max_decode_rate: 547430400,
+            max_display_rate: 534_773_760,
+            max_decode_rate: 547_430_400,
             max_header_rate: 300,
             main_mbps: 40.0,
             high_mbps: 160.0,
@@ -238,11 +238,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         14,
         LevelLimits {
-            max_pic_size: 8912896,
+            max_pic_size: 8_912_896,
             max_h_size: 8192,
             max_v_size: 4352,
-            max_display_rate: 1069547520,
-            max_decode_rate: 1094860800,
+            max_display_rate: 1_069_547_520,
+            max_decode_rate: 1_094_860_800,
             max_header_rate: 300,
             main_mbps: 60.0,
             high_mbps: 240.0,
@@ -255,11 +255,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         15,
         LevelLimits {
-            max_pic_size: 8912896,
+            max_pic_size: 8_912_896,
             max_h_size: 8192,
             max_v_size: 4352,
-            max_display_rate: 1069547520,
-            max_decode_rate: 1176502272,
+            max_display_rate: 1_069_547_520,
+            max_decode_rate: 1_176_502_272,
             max_header_rate: 300,
             main_mbps: 60.0,
             high_mbps: 240.0,
@@ -272,11 +272,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         16,
         LevelLimits {
-            max_pic_size: 35651584,
+            max_pic_size: 35_651_584,
             max_h_size: 16384,
             max_v_size: 8704,
-            max_display_rate: 1069547520,
-            max_decode_rate: 1176502272,
+            max_display_rate: 1_069_547_520,
+            max_decode_rate: 1_176_502_272,
             max_header_rate: 300,
             main_mbps: 60.0,
             high_mbps: 240.0,
@@ -289,11 +289,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         17,
         LevelLimits {
-            max_pic_size: 35651584,
+            max_pic_size: 35_651_584,
             max_h_size: 16384,
             max_v_size: 8704,
-            max_display_rate: 2139095040,
-            max_decode_rate: 2189721600,
+            max_display_rate: 2_139_095_040,
+            max_decode_rate: 2_189_721_600,
             max_header_rate: 300,
             main_mbps: 100.0,
             high_mbps: 480.0,
@@ -306,11 +306,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         18,
         LevelLimits {
-            max_pic_size: 35651584,
+            max_pic_size: 35_651_584,
             max_h_size: 16384,
             max_v_size: 8704,
-            max_display_rate: 4278190080,
-            max_decode_rate: 4379443200,
+            max_display_rate: 4_278_190_080,
+            max_decode_rate: 4_379_443_200,
             max_header_rate: 300,
             main_mbps: 160.0,
             high_mbps: 800.0,
@@ -323,11 +323,11 @@ pub const LEVELS: [Level; 32] = [
     level!(
         19,
         LevelLimits {
-            max_pic_size: 35651584,
+            max_pic_size: 35_651_584,
             max_h_size: 16384,
             max_v_size: 8704,
-            max_display_rate: 4278190080,
-            max_decode_rate: 4706009088,
+            max_display_rate: 4_278_190_080,
+            max_decode_rate: 4_706_009_088,
             max_header_rate: 300,
             main_mbps: 160.0,
             high_mbps: 800.0,
@@ -380,7 +380,7 @@ pub fn calculate_min_pic_compress_ratio(tier: Tier, display_rate: f64) -> [f64; 
             };
 
             // assuming still_picture is equal to 0
-            min_pic_compress_ratio[i] = 0.8_f64.max(min_comp_basis as f64 * speed_adjustment);
+            min_pic_compress_ratio[i] = 0.8_f64.max(f64::from(min_comp_basis) * speed_adjustment);
         }
     }
 
@@ -397,7 +397,7 @@ pub fn calculate_level(context: &SequenceContext) -> Level {
                 limits.high_mbps >= context.mbps
             };
 
-            if limits.max_pic_size >= context.pic_size.0 as u32 * context.pic_size.1 as u32
+            if limits.max_pic_size >= u32::from(context.pic_size.0) * u32::from(context.pic_size.1)
                 && limits.max_h_size >= context.pic_size.0
                 && limits.max_v_size >= context.pic_size.1
                 && limits.max_display_rate >= context.display_rate

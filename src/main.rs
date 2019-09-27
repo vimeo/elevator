@@ -42,7 +42,7 @@ struct ContainerMetadata {
 
 impl Display for ContainerMetadata {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let fps = self.frame_rate as f64 / self.time_scale as f64;
+        let fps = f64::from(self.frame_rate) / f64::from(self.time_scale);
         writeln!(
             f,
             "Frame rate: {:.3} ({}/{})",
@@ -158,6 +158,8 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+// TODO: split this function into smaller parts
+#[allow(clippy::cognitive_complexity)]
 fn process_input(config: &AppConfig) -> io::Result<()> {
     // Open the specified input file using a buffered reader.
     let input_file = OpenOptions::new()
@@ -199,8 +201,8 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
         _ => unimplemented!("non-IVF input not currently supported"),
     };
 
-    let fps = metadata.frame_rate as f64 / metadata.time_scale as f64;
-    let picture_size = metadata.resolution.0 as usize * metadata.resolution.1 as usize;
+    let fps = f64::from(metadata.frame_rate) / f64::from(metadata.time_scale);
+    let picture_size = usize::from(metadata.resolution.0) * usize::from(metadata.resolution.1);
 
     if config.verbose {
         println!("Container metadata:");
@@ -270,9 +272,9 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
                     let delta_time = (pts - cur_tu_time) as f64 / fps;
 
-                    let display_rate = show_count as f64 / delta_time;
+                    let display_rate = f64::from(show_count) / delta_time;
                     max_display_rate = max_display_rate.max(display_rate);
-                    max_decode_rate = max_decode_rate.max(frame_count as f64 / delta_time);
+                    max_decode_rate = max_decode_rate.max(f64::from(frame_count) / delta_time);
                     //max_header_rate = max_header_rate.max(header_count as f64 / delta_time);
 
                     // Calculate bitrate and header rate, windowed over one second (sampled every frame).
@@ -286,7 +288,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                             header_counts.pop_front();
                         }
 
-                        let header_rate = header_counts.iter().sum::<u32>() as f64
+                        let header_rate = f64::from(header_counts.iter().sum::<u32>())
                             * (fps / header_counts.len() as f64);
                         max_header_rate = max_header_rate.max(header_rate);
                     }
@@ -296,7 +298,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                             tu_sizes.pop_front();
                         }
 
-                        let mbps = tu_sizes.iter().sum::<u32>() as f64
+                        let mbps = f64::from(tu_sizes.iter().sum::<u32>())
                             * (fps / tu_sizes.len() as f64)
                             * 8.0
                             / 1_000_000.0;
@@ -312,8 +314,10 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                         let min_pic_compressed_ratio =
                             calculate_min_pic_compress_ratio(tier, display_rate);
 
-                        for level_idx in 0..32 {
-                            if min_compressed_ratio >= min_pic_compressed_ratio[level_idx] {
+                        for (level_idx, compressed_ratio) in
+                            min_pic_compressed_ratio.iter().enumerate()
+                        {
+                            if min_compressed_ratio >= *compressed_ratio {
                                 min_cr_level_idx = min_cr_level_idx.max(level_idx);
                                 break;
                             }
@@ -399,10 +403,10 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                         max_tile_list_bitrate =
                             max_tile_list_bitrate.max(bytes_per_tile_list * 8 * 180);
                         max_tile_decode_rate = max_tile_decode_rate.max(
-                            metadata.resolution.0 as f64 / tile_info.tile_cols as f64
-                                * metadata.resolution.1 as f64
-                                / tile_info.tile_rows as f64
-                                * (tile_list.tile_count_minus_1 + 1) as f64
+                            f64::from(metadata.resolution.0) / f64::from(tile_info.tile_cols)
+                                * f64::from(metadata.resolution.1)
+                                / f64::from(tile_info.tile_rows)
+                                * f64::from(tile_list.tile_count_minus_1 + 1)
                                 * 180.0,
                         );
                     }
@@ -418,20 +422,20 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                 }
             }
 
-            reader.seek(SeekFrom::Start(pos + obu.obu_size as u64))?;
+            reader.seek(SeekFrom::Start(pos + u64::from(obu.obu_size)))?;
         }
 
-        reader.seek(SeekFrom::Start(pos + frame.size as u64))?;
+        reader.seek(SeekFrom::Start(pos + u64::from(frame.size)))?;
     }
 
     // Do the final updates for header/display/show rates.
 
     // Single frame clips don't move forward in time, so set a minimum delta of the framerate's inverse.
     let delta_time = ((cur_tu_time - last_tu_time) as f64 / fps).max(1.0 / fps);
-    let display_rate = show_count as f64 / delta_time;
+    let display_rate = f64::from(show_count) / delta_time;
     max_display_rate = max_display_rate.max(display_rate);
     max_decode_rate = max_decode_rate
-        .max(frame_count as f64 / delta_time)
+        .max(f64::from(frame_count) / delta_time)
         // Tile decode rate is restricted to the level's maximum decode rate halved, so double the input to achieve that effect.
         .max(max_tile_decode_rate * 2.0);
 
@@ -443,17 +447,18 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
     }
 
     // For short clips, scale only the denominator (time scale), not the numerator (headers/bits).
-    let header_rate = header_counts.iter().sum::<u32>() as f64 * (one_second as f64 / fps);
+    let header_rate = f64::from(header_counts.iter().sum::<u32>()) * (one_second as f64 / fps);
     max_header_rate = max_header_rate.max(header_rate);
 
     while tu_sizes.len() > one_second {
         tu_sizes.pop_front();
     }
 
-    let mbps = tu_sizes.iter().sum::<u32>() as f64 * (one_second as f64 / fps) * 8.0 / 1_000_000.0;
+    let mbps =
+        f64::from(tu_sizes.iter().sum::<u32>()) * (one_second as f64 / fps) * 8.0 / 1_000_000.0;
     max_mbps = max_mbps
         .max(mbps)
-        .max(max_tile_list_bitrate as f64 / 1_000_000.0);
+        .max(f64::from(max_tile_list_bitrate) / 1_000_000.0);
 
     let sh = seq.sh.unwrap(); // sequence header
     let tier = if sh.op[0].seq_tier == 0 {
@@ -463,8 +468,8 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
     };
     let min_pic_compressed_ratio = calculate_min_pic_compress_ratio(tier, display_rate);
 
-    for level_idx in 0..32 {
-        if min_compressed_ratio >= min_pic_compressed_ratio[level_idx] {
+    for (level_idx, compressed_ratio) in min_pic_compressed_ratio.iter().enumerate() {
+        if min_compressed_ratio >= *compressed_ratio {
             min_cr_level_idx = min_cr_level_idx.max(level_idx);
             break;
         }
@@ -491,7 +496,10 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
         println!("Maximum bitrate: {:.3} Mbps", max_mbps);
 
-        println!("Maximum number of tiles and tile columns found: {}, {}", max_tiles, max_tile_cols);
+        println!(
+            "Maximum number of tiles and tile columns found: {}, {}",
+            max_tiles, max_tile_cols
+        );
     }
 
     // Determine the output level.
@@ -568,7 +576,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
         // Generate a bitstream-aligned two-byte sequence containing the level bits.
         let level_aligned =
-            (((level.0 as u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
+            ((u32::from(level.0) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
         // Generate a two-byte mask to filter out the non-level bits.
         let level_bit_mask =
             (((0b0001_1111_u32) << 11 >> lv_bit_offset_in_byte) as u16).to_be_bytes();
@@ -595,13 +603,13 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
         let mut byte_buf = [0_u8; 2];
         reader
-            .read(&mut byte_buf)
+            .read_exact(&mut byte_buf)
             .expect("could not read the level byte(s)");
 
         // Ensure that the bytes read from the input file correspond to the level parsed earlier.
         assert_eq!(
             old_level.0,
-            ((u16::from_be_bytes(byte_buf) as u32) >> 11 << lv_bit_offset_in_byte) as u8,
+            (u32::from(u16::from_be_bytes(byte_buf)) >> 11 << lv_bit_offset_in_byte) as u8,
             "level at the location seeked to patch does not match the parsed value"
         );
 
@@ -629,7 +637,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
             // Read one byte ahead, to shift the second byte in the current two-byte sequence.
             reader
-                .read(&mut next_input_byte)
+                .read_exact(&mut next_input_byte)
                 .expect("could not read the post-tier byte");
 
             tier_adjusted_bits = [
@@ -674,13 +682,13 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                 let prev_input_byte = next_input_byte;
 
                 reader
-                    .read(&mut next_input_byte)
+                    .read_exact(&mut next_input_byte)
                     .expect("could not read sequence header OBU byte");
 
                 next_output_byte = (prev_input_byte[0] << 1) | (next_input_byte[0] >> 7);
             } else if old_level.0 <= 7 && level.0 > 7 {
                 reader
-                    .read(&mut next_input_byte)
+                    .read_exact(&mut next_input_byte)
                     .expect("could not read sequence header OBU byte");
 
                 next_output_byte = next_input_byte[0] >> 1 | carry_bit;
