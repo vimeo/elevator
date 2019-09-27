@@ -81,7 +81,6 @@ fn main() -> io::Result<()> {
         .iter()
         .filter(|&l| l.is_valid())
         .map(|&l| l.0.to_string())
-        .rev()
         .collect::<Vec<_>>();
 
     // Define the command line interface.
