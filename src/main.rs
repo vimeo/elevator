@@ -9,8 +9,11 @@ use av1parser as av1p;
 use clap::{App, Arg};
 use level::*;
 use std::collections::VecDeque;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
+use std::io;
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 #[derive(PartialEq)]
 enum Output<'a> {
@@ -26,13 +29,38 @@ struct AppConfig<'a> {
     forced_level: Option<Level>,
 }
 
-struct ContainerData {
+struct ContainerMetadata {
     frame_rate: u32,
     time_scale: u32,
     resolution: (u16, u16), // (width, height)
 }
 
-fn main() -> Result<()> {
+impl Display for ContainerMetadata {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let fps = self.frame_rate as f64 / self.time_scale as f64;
+        writeln!(
+            f,
+            "Frame rate: {:.3} ({}/{})",
+            fps, self.frame_rate, self.time_scale
+        )?;
+        writeln!(f, "Resolution: {}x{}", self.resolution.0, self.resolution.1)?;
+
+        Ok(())
+    }
+}
+
+struct ContainerFrameMetadata {
+    size: u32,
+    display_timestamp: u64,
+}
+
+impl Display for ContainerFrameMetadata {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Frame @ {}: {} bytes", self.display_timestamp, self.size)
+    }
+}
+
+fn main() -> io::Result<()> {
     /// Shortcut for fetching a Cargo environment variable.
     macro_rules! cargo_env {
         ($name: expr) => {
@@ -120,7 +148,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn process_input(config: &AppConfig) -> Result<()> {
+fn process_input(config: &AppConfig) -> io::Result<()> {
     // Open the specified input file using a buffered reader.
     let input_file = OpenOptions::new()
         .read(true)
@@ -152,29 +180,21 @@ fn process_input(config: &AppConfig) -> Result<()> {
         av1p::FileFormat::IVF => {
             let header = ivf::parse_ivf_header(&mut reader, config.input)?;
 
-            ContainerData {
+            ContainerMetadata {
                 frame_rate: header.framerate,
                 time_scale: header.timescale,
                 resolution: (header.width, header.height),
             }
         }
-        _ => {
-            unimplemented!("non-IVF input not currently supported");
-        }
+        _ => unimplemented!("non-IVF input not currently supported"),
     };
 
     let fps = metadata.frame_rate as f64 / metadata.time_scale as f64;
     let picture_size = metadata.resolution.0 as usize * metadata.resolution.1 as usize;
 
     if config.verbose {
-        println!(
-            "header-reported resolution: {}x{}",
-            metadata.resolution.0, metadata.resolution.1
-        );
-        println!(
-            "header-reported frame rate: {:3} ({}/{})",
-            fps, metadata.frame_rate, metadata.time_scale
-        );
+        println!("Container metadata:");
+        println!("{}", metadata);
     }
 
     // TODO: do not parse the whole stream if setting a level manually
@@ -195,9 +215,31 @@ fn process_input(config: &AppConfig) -> Result<()> {
 
     let one_second = fps.ceil() as usize;
 
-    // Adapted from av1parser
-    while let Ok(frame) = av1p::ivf::parse_ivf_frame(&mut reader) {
+    fn get_container_frame<R: io::Read>(
+        reader: &mut R,
+        fmt: &av1p::FileFormat,
+    ) -> Option<ContainerFrameMetadata> {
+        match fmt {
+            av1p::FileFormat::IVF => {
+                if let Ok(frame) = av1p::ivf::parse_ivf_frame(reader) {
+                    ContainerFrameMetadata {
+                        size: frame.size,
+                        display_timestamp: frame.pts,
+                    }
+                    .into()
+                } else {
+                    None
+                }
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    while let Some(frame) = get_container_frame(&mut reader, &fmt) {
         let mut sz = frame.size;
+        let pts = frame.display_timestamp;
 
         let pos = reader.seek(SeekFrom::Current(0))?;
         while sz > 0 {
@@ -208,12 +250,12 @@ fn process_input(config: &AppConfig) -> Result<()> {
 
             match obu.obu_type {
                 av1p::obu::OBU_TEMPORAL_DELIMITER => {
-                    if frame.pts == cur_tu_time {
+                    if pts == cur_tu_time {
                         // duplicate temporal delimiter?
                         continue;
                     }
 
-                    let delta_time = (frame.pts - cur_tu_time) as f64 / fps;
+                    let delta_time = (pts - cur_tu_time) as f64 / fps;
 
                     let display_rate = show_count as f64 / delta_time;
                     max_display_rate = max_display_rate.max(display_rate);
@@ -304,7 +346,7 @@ fn process_input(config: &AppConfig) -> Result<()> {
                         ) {
                             if !seen_frame_header {
                                 last_tu_time = cur_tu_time;
-                                cur_tu_time = frame.pts;
+                                cur_tu_time = pts;
                             }
                             seen_frame_header = true;
 
