@@ -18,14 +18,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "av1levelr"
-version = "0.1.0"
-dependencies = [
- "av1parser 0.1.0 (git+https://github.com/yohhoy/av1parser)",
- "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "av1parser"
 version = "0.1.0"
 source = "git+https://github.com/yohhoy/av1parser#1b1ca96a94839d2bec3b847cadc84a1b34112679"
@@ -57,6 +49,14 @@ dependencies = [
  "textwrap 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode-width 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "elevator"
+version = "1.0.0"
+dependencies = [
+ "av1parser 0.1.0 (git+https://github.com/yohhoy/av1parser)",
+ "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

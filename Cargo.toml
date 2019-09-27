@@ -1,6 +1,6 @@
 [package]
-name = "av1levelr"
-version = "0.1.0"
+name = "elevator"
+version = "1.0.0"
 authors = ["Raphaël Zumer <raphael.zumer@vimeo.com>"]
 edition = "2018"
 
