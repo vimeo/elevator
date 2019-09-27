@@ -108,7 +108,7 @@ fn main() -> io::Result<()> {
         .arg(
             Arg::with_name("inplace")
                 .long("inplace")
-                .help("Patch file in-place"),
+                .help("Patch file in place"),
         )
         .arg(
             Arg::with_name("forcedlevel")
@@ -128,7 +128,7 @@ fn main() -> io::Result<()> {
 
     // Parse command line input.
     if matches.is_present("output") && matches.is_present("inplace") {
-        panic!("cannot specify an output file and in-place at the same time");
+        panic!("cannot specify an output file and in place at the same time");
     }
 
     let config = AppConfig {
