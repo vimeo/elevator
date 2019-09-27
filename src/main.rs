@@ -22,6 +22,7 @@ enum Output<'a> {
     CommandLine,
 }
 
+/// Configuration parameters received via CLI
 struct AppConfig<'a> {
     verbose: bool,
     input: &'a str,
@@ -29,10 +30,14 @@ struct AppConfig<'a> {
     forced_level: Option<Level>,
 }
 
+/// Container-level stream metadata
 struct ContainerMetadata {
+    /// Frame rate in `time_scale` units
     frame_rate: u32,
+    /// Temporal resolution, such that `time_scale` units represent one second of real time
     time_scale: u32,
-    resolution: (u16, u16), // (width, height)
+    /// Frame width and height in pixels
+    resolution: (u16, u16),
 }
 
 impl Display for ContainerMetadata {
@@ -49,8 +54,11 @@ impl Display for ContainerMetadata {
     }
 }
 
+/// Container-level frame metadata
 struct ContainerFrameMetadata {
+    /// Size of the frame in bytes
     size: u32,
+    /// Display timestamp of the frame at the time scale of the stream
     display_timestamp: u64,
 }
 
@@ -68,6 +76,7 @@ fn main() -> io::Result<()> {
         };
     }
 
+    // Generate a list of valid levels to validate the `forcedlevel` argument.
     let level_strings = LEVELS
         .iter()
         .filter(|&l| l.is_valid())
@@ -75,6 +84,7 @@ fn main() -> io::Result<()> {
         .rev()
         .collect::<Vec<_>>();
 
+    // Define the command line interface.
     let matches = App::new(cargo_env!("NAME"))
         .version(cargo_env!("VERSION"))
         .author(cargo_env!("AUTHORS"))
@@ -116,6 +126,7 @@ fn main() -> io::Result<()> {
         )
         .get_matches();
 
+    // Parse command line input.
     if matches.is_present("output") && matches.is_present("inplace") {
         panic!("cannot specify an output file and in-place at the same time");
     }
@@ -237,11 +248,14 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
         }
     }
 
+    // Read one frame from the container at a time.
     while let Some(frame) = get_container_frame(&mut reader, &fmt) {
         let mut sz = frame.size;
         let pts = frame.display_timestamp;
 
         let pos = reader.seek(SeekFrom::Current(0))?;
+
+        // Read all AV1 OBUs in the container frame.
         while sz > 0 {
             let obu = av1p::obu::parse_obu_header(&mut reader, sz)?;
 
@@ -460,25 +474,25 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
     total_show_count += show_count;
 
     if sh.operating_points_cnt > 1 {
-        unimplemented!("multiple operating points are not yet supported");
+        unimplemented!("streams with multiple operating points not yet supported");
     }
 
     if config.verbose {
-        println!("counted number of displayed frames: {}", total_show_count);
+        println!("Number of displayed frames: {}", total_show_count);
 
         println!(
-            "max header, display, decode rates: {:.3}, {:.3}, {:.3}",
+            "Maximum header, display, and decode rates in a single temporal unit: {:.3}, {:.3}, {:.3}",
             max_header_rate, max_display_rate, max_decode_rate
         );
 
         println!(
-            "minimum level for CR constraints: {}",
+            "Minimum level required to satisfy compressed ratio constraint: {}",
             LEVELS[min_cr_level_idx]
         );
 
-        println!("max mbps: {:.3}", max_mbps);
+        println!("Maximum bitrate: {:.3} Mbps", max_mbps);
 
-        println!("max tile cols: {}, max tiles: {}", max_tile_cols, max_tiles);
+        println!("Maximum number of tiles and tile columns found: {}, {}", max_tiles, max_tile_cols);
     }
 
     // Determine the output level.
@@ -686,7 +700,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
         writer.flush()?;
     }
 
-    println!("level: {} -> {}", old_level, level);
+    println!("Level: {} -> {}", old_level, level);
 
     Ok(())
 }
