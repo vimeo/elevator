@@ -14,6 +14,7 @@ impl Default for Tier {
 
 /// Describes the maximum parameters relevant to level restrictions
 /// encountered in a sequence.
+#[derive(Default)]
 pub struct SequenceContext {
     pub tier: Tier,
     pub pic_size: (u16, u16), // (width, height)
@@ -413,4 +414,32 @@ pub fn calculate_level(context: &SequenceContext) -> Level {
     }
 
     unreachable!("no suitable level found");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_level_minimum_parameters() {
+        let seq_ctx_min = SequenceContext::default();
+
+        assert_eq!(0, calculate_level(&seq_ctx_min).0);
+    }
+
+    #[test]
+    fn test_calculate_level_maximum_parameters() {
+        let seq_ctx_max = SequenceContext {
+            tier: Tier::High,
+            pic_size: (std::u16::MAX, std::u16::MAX),
+            display_rate: std::u64::MAX,
+            decode_rate: std::u64::MAX,
+            header_rate: std::u16::MAX,
+            mbps: std::f64::MAX,
+            tiles: std::u8::MAX,
+            tile_cols: std::u8::MAX,
+        };
+
+        assert_eq!(31, calculate_level(&seq_ctx_max).0);
+    }
 }
