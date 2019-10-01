@@ -206,8 +206,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
         _ => unimplemented!("non-IVF input not currently supported"),
     };
 
-    // TODO: correct this implementation, `time_scale` is not necessarily the frame rate.
-    let fps = metadata.time_scale();
+    let time_scale = metadata.time_scale();
     let picture_size = usize::from(metadata.resolution.0) * usize::from(metadata.resolution.1);
 
     if config.verbose {
@@ -224,14 +223,13 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
     let mut frame_size = 0_i64; // total compressed size for the current frame (includes frame, frame header, metadata, and tile group OBUs)
     let mut tu_size = 0; // total size of frames in the current temporal unit
     let mut tu_sizes = VecDeque::<u32>::new(); // one-second buffer for bitrate calculation per temporal unit
+    let mut tu_times = VecDeque::<u64>::new(); // one-second buffer for time scale units taken per temporal unit
     let mut header_counts = VecDeque::<u32>::new(); // one-second buffer for number of headers per temporal unit
     let mut seen_frame_header = false; // refreshed with each temporal unit
     let mut min_compressed_ratio = std::f64::MAX; // min compression ratio for a single frame
     let mut tile_info = av1p::obu::TileInfo::default(); // last seen tile information
 
     let mut total_show_count = 0; // total number of displayed frames
-
-    let one_second = fps.ceil() as usize;
 
     fn get_container_frame<R: io::Read>(
         reader: &mut R,
@@ -276,7 +274,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                         continue;
                     }
 
-                    let delta_time = (pts - cur_tu_time) as f64 / fps;
+                    let delta_time = (pts - cur_tu_time) as f64 / time_scale;
 
                     let display_rate = f64::from(show_count) / delta_time;
                     max_display_rate = max_display_rate.max(display_rate);
@@ -288,24 +286,26 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                     // This is not clear in the specification, but seems implied.
                     header_counts.push_back(header_count);
                     tu_sizes.push_back(tu_size);
+                    tu_times.push_back(pts - cur_tu_time);
 
-                    if header_counts.len() >= one_second {
-                        while header_counts.len() > one_second {
+                    let mut tu_times_sum = tu_times.iter().sum::<u64>() as f64;
+
+                    if tu_times_sum >= time_scale.round() {
+                        while tu_times_sum > time_scale.round() {
                             header_counts.pop_front();
-                        }
-
-                        let header_rate = f64::from(header_counts.iter().sum::<u32>())
-                            * (fps / header_counts.len() as f64);
-                        max_header_rate = max_header_rate.max(header_rate);
-                    }
-
-                    if tu_sizes.len() >= one_second {
-                        while tu_sizes.len() > one_second {
                             tu_sizes.pop_front();
+                            tu_times.pop_front();
+
+                            tu_times_sum = tu_times.iter().sum::<u64>() as f64
                         }
+
+                        let factor = time_scale / tu_times_sum; // adjustment to measure rates per second
+
+                        let header_rate = f64::from(header_counts.iter().sum::<u32>()) * factor;
+                        max_header_rate = max_header_rate.max(header_rate);
 
                         let mbps = f64::from(tu_sizes.iter().sum::<u32>())
-                            * (fps / tu_sizes.len() as f64)
+                            * factor
                             * 8.0
                             / 1_000_000.0;
                         max_mbps = max_mbps.max(mbps);
@@ -437,7 +437,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
     // Do the final updates for header/display/show rates.
 
     // Single frame clips don't move forward in time, so set a minimum delta of the framerate's inverse.
-    let delta_time = ((cur_tu_time - last_tu_time) as f64 / fps).max(1.0 / fps);
+    let delta_time = ((cur_tu_time - last_tu_time) as f64 / time_scale).max(1.0 / time_scale * cur_tu_time as f64);
     let display_rate = f64::from(show_count) / delta_time;
     max_display_rate = max_display_rate.max(display_rate);
     max_decode_rate = max_decode_rate
@@ -447,24 +447,27 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
     header_counts.push_back(header_count);
     tu_sizes.push_back(tu_size);
+    tu_times.push_back(cur_tu_time - last_tu_time);
 
-    while header_counts.len() > one_second {
+    let mut tu_times_sum = tu_times.iter().sum::<u64>() as f64;
+
+    // We do not want to interpolate for short clips, since their effective rate per second is the same as their total rate.
+    // However, for clips that fill the one-second buffers, interpolation should occur for the last frame as well.
+    let factor = if tu_times_sum >= time_scale.round() { time_scale / tu_times_sum } else { 1.0 };
+
+    while tu_times_sum > time_scale.round() {
         header_counts.pop_front();
+        tu_sizes.pop_front();
+        tu_times.pop_front();
+
+        tu_times_sum = tu_times.iter().sum::<u64>() as f64
     }
 
-    // For short clips, scale only the denominator (time scale), not the numerator (headers/bits).
-    let header_rate = f64::from(header_counts.iter().sum::<u32>()) * (one_second as f64 / fps);
+    let header_rate = f64::from(header_counts.iter().sum::<u32>()) * factor;
     max_header_rate = max_header_rate.max(header_rate);
 
-    while tu_sizes.len() > one_second {
-        tu_sizes.pop_front();
-    }
-
-    let mbps =
-        f64::from(tu_sizes.iter().sum::<u32>()) * (one_second as f64 / fps) * 8.0 / 1_000_000.0;
-    max_mbps = max_mbps
-        .max(mbps)
-        .max(f64::from(max_tile_list_bitrate) / 1_000_000.0);
+    let mbps = f64::from(tu_sizes.iter().sum::<u32>()) * factor * 8.0 / 1_000_000.0;
+    max_mbps = max_mbps.max(mbps);
 
     let sh = seq.sh.unwrap(); // sequence header
     let tier = if sh.op[0].seq_tier == 0 {
