@@ -32,21 +32,26 @@ struct AppConfig<'a> {
 
 /// Container-level stream metadata
 struct ContainerMetadata {
-    /// Frame rate in `time_scale` units
-    frame_rate: u32,
     /// Temporal resolution, such that `time_scale` units represent one second of real time
-    time_scale: u32,
+    /// Represented as a rational (numerator, denominator)
+    time_scale: (u32, u32),
     /// Frame width and height in pixels
     resolution: (u16, u16),
 }
 
+impl ContainerMetadata {
+    /// Provides the time base in floating point form
+    fn time_scale(&self) -> f64 {
+        f64::from(self.time_scale.0) / f64::from(self.time_scale.1)
+    }
+}
+
 impl Display for ContainerMetadata {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let fps = f64::from(self.frame_rate) / f64::from(self.time_scale);
         writeln!(
             f,
-            "Frame rate: {:.3} ({}/{})",
-            fps, self.frame_rate, self.time_scale
+            "Time scale: {:.3} ({}/{})",
+            self.time_scale(), self.time_scale.0, self.time_scale.1
         )?;
         writeln!(f, "Resolution: {}x{}", self.resolution.0, self.resolution.1)?;
 
@@ -193,15 +198,16 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
             let header = ivf::parse_ivf_header(&mut reader, config.input)?;
 
             ContainerMetadata {
-                frame_rate: header.framerate,
-                time_scale: header.timescale,
+                // Note: the `framerate` field name (from av1parser) is inaccurate
+                time_scale: (header.framerate, header.timescale),
                 resolution: (header.width, header.height),
             }
         }
         _ => unimplemented!("non-IVF input not currently supported"),
     };
 
-    let fps = f64::from(metadata.frame_rate) / f64::from(metadata.time_scale);
+    // TODO: correct this implementation, `time_scale` is not necessarily the frame rate.
+    let fps = metadata.time_scale();
     let picture_size = usize::from(metadata.resolution.0) * usize::from(metadata.resolution.1);
 
     if config.verbose {
