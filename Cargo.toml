@@ -7,5 +7,5 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-av1parser = { git = "https://github.com/yohhoy/av1parser" }
+av1parser = { git = "https://github.com/yohhoy/av1parser", commit = "21180d82e488c42d4e7c23d12e03dc222d984a54" }
 clap = "~2.33"
