@@ -1,0 +1,13 @@
+language: rust
+matrix:
+  include:
+    - name: "elevator"
+before_script:
+  - rustup component add clippy
+  - rustup component add rustfmt
+script:
+  - cargo fmt --all -- --check
+  - cargo clippy --all-targets --all-features -- -D warnings
+  - cargo build
+  - cargo test
+- cargo bench --no-run
