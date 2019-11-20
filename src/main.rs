@@ -682,7 +682,7 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
             .expect("could not write the level byte(s)");
 
         // Realign the rest of the sequence header OBU if needed (i.e. if a tier bit is added/removed).
-        let mut pos_in_seq = lv_bit_offset_in_seq / 8 + 2;; // writer's position within the sequence header
+        let mut pos_in_seq = lv_bit_offset_in_seq / 8 + 2; // writer's position within the sequence header
         let mut next_output_byte: u8;
 
         while pos_in_seq < seq_sz.into() {
