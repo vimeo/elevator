@@ -1,11 +1,13 @@
-# elevator
+# Elevator
+
+![Logo](elevator.png)
 
 This is a CLI application for validating and correcting the level syntax element in the sequence header of AV1 streams.
 
 Encoders tend to do a poor job of setting the level accurately, because headers are usually written before the rest of the stream.
 Without enforcing constraints to keep encoded streams below a given level, estimating the correct one in advance is difficult to impossible.
 
-`elevator` parses a fully-encoded stream, calculates all the necessary parameters and determines the minimum acceptable level that will allow a spec-conformant decoder to decode it. It can then output this level to the command line, or patch it, either in place or to a new file.
+Elevator parses a fully-encoded stream, calculates all the necessary parameters and determines the minimum acceptable level that will allow a spec-conformant decoder to decode it. It can then output this level to the command line, or patch it, either in place or to a new file.
 
 ## Restrictions
 - Only IVF file input is supported
