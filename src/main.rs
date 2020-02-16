@@ -610,16 +610,21 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
             if config.verbose {
                 println!(
-                    "offset: {} | level bits: {:#010b}, {:#010b}",
-                    lv_bit_offset_in_byte, level_aligned[0], level_aligned[1]
+                    "Patching sequence header #{} with offset {}",
+                    i, lv_bit_offset_in_byte
                 );
-
-                println!(
-                    "level/tier/post-tier bit masks: {:#018b} / {:#018b} / {:#018b}",
-                    u16::from_be_bytes(level_bit_mask),
-                    u16::from_be_bytes(tier_bit_mask),
-                    u16::from_be_bytes(post_tier_bit_mask)
-                );
+                
+                if i == 0 {
+                    println!("Level bits: {:#010b}, {:#010b}",
+                        level_aligned[0], level_aligned[1]
+                    );
+                    println!(
+                        "Level/tier/post-tier bit masks: {:#018b}/{:#018b}/{:#018b}",
+                        u16::from_be_bytes(level_bit_mask),
+                        u16::from_be_bytes(tier_bit_mask),
+                        u16::from_be_bytes(post_tier_bit_mask)
+                    );
+                }
             }
 
             let mut byte_buf = [0_u8; 2];
