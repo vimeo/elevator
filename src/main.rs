@@ -52,7 +52,9 @@ impl Display for ContainerMetadata {
         writeln!(
             f,
             "Time scale: {:.3} ({}/{})",
-            self.time_scale(), self.time_scale.0, self.time_scale.1
+            self.time_scale(),
+            self.time_scale.0,
+            self.time_scale.1
         )?;
         writeln!(f, "Resolution: {}x{}", self.resolution.0, self.resolution.1)?;
 
@@ -305,10 +307,8 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                         let header_rate = f64::from(header_counts.iter().sum::<u32>()) * factor;
                         max_header_rate = max_header_rate.max(header_rate);
 
-                        let mbps = f64::from(tu_sizes.iter().sum::<u32>())
-                            * factor
-                            * 8.0
-                            / 1_000_000.0;
+                        let mbps =
+                            f64::from(tu_sizes.iter().sum::<u32>()) * factor * 8.0 / 1_000_000.0;
                         max_mbps = max_mbps.max(mbps);
                     }
 
@@ -438,7 +438,8 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
     // Do the final updates for header/display/show rates.
 
     // Single frame clips don't move forward in time, so set a minimum delta of the framerate's inverse.
-    let delta_time = ((cur_tu_time - last_tu_time) as f64 / time_scale).max(1.0 / time_scale * cur_tu_time as f64);
+    let delta_time = ((cur_tu_time - last_tu_time) as f64 / time_scale)
+        .max(1.0 / time_scale * cur_tu_time as f64);
     let display_rate = f64::from(show_count) / delta_time;
     max_display_rate = max_display_rate.max(display_rate);
     max_decode_rate = max_decode_rate
@@ -454,7 +455,11 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
 
     // We do not want to interpolate for short clips, since their effective rate per second is the same as their total rate.
     // However, for clips that fill the one-second buffers, interpolation should occur for the last frame as well.
-    let factor = if tu_times_sum >= time_scale.round() { time_scale / tu_times_sum } else { 1.0 };
+    let factor = if tu_times_sum >= time_scale.round() {
+        time_scale / tu_times_sum
+    } else {
+        1.0
+    };
 
     while tu_times_sum > time_scale.round() {
         header_counts.pop_front();
@@ -613,9 +618,10 @@ fn process_input(config: &AppConfig) -> io::Result<()> {
                     "Patching sequence header #{} with offset {}",
                     i, lv_bit_offset_in_byte
                 );
-                
+
                 if i == 0 {
-                    println!("Level bits: {:#010b}, {:#010b}",
+                    println!(
+                        "Level bits: {:#010b}, {:#010b}",
                         level_aligned[0], level_aligned[1]
                     );
                     println!(
