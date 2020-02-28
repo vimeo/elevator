@@ -1,6 +1,6 @@
 [package]
 name = "elevator"
-version = "1.0.0"
+version = "1.1.1"
 authors = ["Raphaël Zumer <raphael.zumer@vimeo.com>"]
 edition = "2018"
 
