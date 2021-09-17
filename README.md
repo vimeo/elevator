@@ -12,8 +12,8 @@ Elevator parses a fully-encoded stream, calculates all the necessary parameters 
 ## Restrictions
 - Only IVF file input is supported
 - Only one operating point is supported
-- Some parameters are parsed from the first sequence header only, and assumed to be consistent across sequences
-- Some rarely-used AV1 features, like scalability and super resolution, will probably produce incorrect output
+- Some parameters are parsed from the first sequence header only, and are assumed to be consistent across sequences
+- Some uncommon AV1 features, like scalability and super resolution, are untested and may produce incorrect output
 
 ## Usage
 ```
